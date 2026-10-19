@@ -1,0 +1,30 @@
+{
+  "name": "whatsapp-ai-crm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SaaS CRM Omnicanal de WhatsApp con Asistentes IA Multi-tenant",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "start": "npm run start --workspaces --if-present",
+    "db:generate": "npm run db:generate -w @crm/database",
+    "db:push": "npm run db:push -w @crm/database",
+    "db:seed": "npm run db:seed -w @crm/database"
+  },
+  "keywords": [
+    "whatsapp",
+    "crm",
+    "saas",
+    "multi-tenant",
+    "gemini",
+    "ai-assistant",
+    "baileys",
+    "bullmq"
+  ],
+  "author": "Antigravity Senior Architecture",
+  "license": "UNLICENSED"
+}

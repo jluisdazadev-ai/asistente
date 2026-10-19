@@ -1,0 +1,505 @@
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+// ========================================================
+// 1. TENANCY, PLANES Y USUARIOS
+// ========================================================
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  SUSPENDED
+}
+
+enum UserRole {
+  SUPERADMIN
+  TENANT_OWNER
+  TENANT_ADMIN
+  TENANT_AGENT
+}
+
+model Plan {
+  id                         String    @id @default(uuid())
+  name                       String
+  slug                       String    @unique
+  priceCents                 Int       @default(0)
+  currency                   String    @default("USD")
+  maxConversationsPerMonth   Int       @default(1000)
+  maxTeamMembers             Int       @default(3)
+  maxKnowledgeDocs           Int       @default(5)
+  allowQrGateway             Boolean   @default(true)
+  allowOfficialGateway       Boolean   @default(true)
+  allowVoiceNotes            Boolean   @default(true)
+  allowVisionOcr             Boolean   @default(true)
+  tenants                    Tenant[]
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  @@map("plans")
+}
+
+model Tenant {
+  id                   String               @id @default(uuid())
+  businessName         String
+  slug                 String               @unique
+  planId               String?
+  plan                 Plan?                @relation(fields: [planId], references: [id], onDelete: Restrict)
+  subscriptionStatus   SubscriptionStatus   @default(TRIAL)
+  trialEndsAt          DateTime?
+  billingEmail         String
+  phone                String?
+  countryCode          String               @default("CO")
+  currency             String               @default("COP")
+  isActive             Boolean              @default(true)
+  
+  users                User[]
+  connections          WhatsAppConnection[]
+  botConfig            BotConfiguration?
+  businessHours        BusinessHour[]
+  bankAccounts         BankAccount[]
+  deliveryZones        DeliveryZone[]
+  products             Product[]
+  documents            KnowledgeDocument[]
+  embeddings           KnowledgeEmbedding[]
+  pipelines            CrmPipeline[]
+  contacts             Contact[]
+  conversations        Conversation[]
+  messages             Message[]
+  orders               Order[]
+  officialTemplates    OfficialHsmTemplate[]
+
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  @@map("tenants")
+}
+
+model User {
+  id                   String        @id @default(uuid())
+  tenantId             String?
+  tenant               Tenant?       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role                 UserRole      @default(TENANT_AGENT)
+  email                String        @unique
+  passwordHash         String
+  fullName             String
+  avatarUrl            String?
+  isActive             Boolean       @default(true)
+  
+  assignedConversations Conversation[]
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+// ========================================================
+// 2. CONEXIÓN A WHATSAPP (GATEWAY DUAL: QR / OFICIAL)
+// ========================================================
+
+enum GatewayProvider {
+  QR_BAILEYS
+  META_OFFICIAL
+}
+
+enum ConnectionStatus {
+  DISCONNECTED
+  STARTING
+  SCAN_QR
+  CONNECTED
+  DEGRADED
+}
+
+model WhatsAppConnection {
+  id                   String            @id @default(uuid())
+  tenantId             String
+  tenant               Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  gatewayType          GatewayProvider   @default(QR_BAILEYS)
+  status               ConnectionStatus  @default(DISCONNECTED)
+  phoneNumber          String?
+  displayName          String?
+  
+  // Opción A: QR / Baileys
+  sessionId            String?           @unique
+  qrCodeRaw            String?
+  qrCodeBase64         String?           @db.Text
+  retryCount           Int               @default(0)
+  
+  // Opción B: Meta Cloud API Oficial
+  wabaId               String?
+  phoneNumberId        String?
+  accessTokenEncrypted String?           @db.Text
+  appId                String?
+  webhookVerifyToken   String?
+  
+  lastPingAt           DateTime?
+  conversations        Conversation[]
+
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  @@unique([tenantId, gatewayType])
+  @@map("whatsapp_connections")
+}
+
+model OfficialHsmTemplate {
+  id                   String    @id @default(uuid())
+  tenantId             String
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  templateName         String
+  category             String    // MARKETING, UTILITY, AUTHENTICATION
+  language             String    @default("es")
+  status               String    @default("PENDING") // APPROVED, REJECTED, PENDING
+  metaTemplateId       String?
+  components           Json      // Headers, Body text con {{1}}, Buttons
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@map("official_hsm_templates")
+}
+
+// ========================================================
+// 3. CONFIGURADOR DEL ASISTENTE IA (BOT BUILDER)
+// ========================================================
+
+enum BotTone {
+  FRIENDLY
+  FORMAL
+  AGGRESSIVE_SALES
+  TECH_SUPPORT
+  CONCILIATORY
+}
+
+model BotConfiguration {
+  id                   String    @id @default(uuid())
+  tenantId             String    @unique
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  botName              String    @default("Asistente Virtual")
+  roleDescription      String    @db.Text
+  tone                 BotTone   @default(FRIENDLY)
+  temperature          Decimal   @default(0.40) @db.Decimal(3, 2)
+  businessRules        String?   @db.Text
+  customSystemPrompt   String?   @db.Text
+  
+  // Parámetros Anti-Ban y Comportamiento Humano
+  debounceSeconds            Int       @default(6)
+  typingSimulationEnabled   Boolean   @default(true)
+  minTypingDelayMs          Int       @default(1200)
+  maxTypingDelayMs          Int       @default(4500)
+  
+  // Capacidades Multimodales (Gemini)
+  voiceInEnabled             Boolean   @default(true)
+  voiceOutEnabled            Boolean   @default(false)
+  ttsVoiceId                 String?   @default("es-CO-Standard-A")
+  visionOcrEnabled           Boolean   @default(true)
+  
+  // Horarios
+  outOfHoursReplyEnabled     Boolean   @default(true)
+  outOfHoursMessage          String?   @default("¡Hola! En este momento estamos fuera de nuestro horario de atención. Déjanos tu mensaje y te responderemos a primera hora.") @db.Text
+  
+  isActive                   Boolean   @default(true)
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  @@map("bot_configurations")
+}
+
+model BusinessHour {
+  id                   String    @id @default(uuid())
+  tenantId             String
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dayOfWeek            Int       // 0 = Domingo, 1 = Lunes, ..., 6 = Sábado
+  openTime             String    // formato "08:00"
+  closeTime            String    // formato "18:00"
+  isClosed             Boolean   @default(false)
+
+  @@unique([tenantId, dayOfWeek])
+  @@map("business_hours")
+}
+
+model BankAccount {
+  id                   String    @id @default(uuid())
+  tenantId             String
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  bankName             String    // Nequi, Bancolombia, Daviplata, etc.
+  accountType          String    // Ahorros, Corriente, Llave Transfiya
+  accountNumber        String
+  holderName           String
+  holderId             String?
+  qrImageUrl           String?
+  isActive             Boolean   @default(true)
+
+  @@map("bank_accounts")
+}
+
+model DeliveryZone {
+  id                   String    @id @default(uuid())
+  tenantId             String
+  tenant               Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  zoneName             String
+  price                Decimal   @default(0.00) @db.Decimal(12, 2)
+  estimatedMinutes     Int       @default(45)
+  isActive             Boolean   @default(true)
+  orders               Order[]
+
+  @@map("delivery_zones")
+}
+
+// ========================================================
+// 4. CATÁLOGO DE PRODUCTOS Y RAG VECTORIAL
+// ========================================================
+
+model Product {
+  id                   String      @id @default(uuid())
+  tenantId             String
+  tenant               Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sku                  String?
+  name                 String
+  description          String?     @db.Text
+  category             String?
+  price                Decimal     @db.Decimal(12, 2)
+  costPrice            Decimal?    @db.Decimal(12, 2)
+  stockQuantity        Int         @default(0)
+  isStockActive        Boolean     @default(true)
+  imageUrl             String?
+  variants             Json        @default("[]") // [{"name": "Talla", "options": ["S", "M", "L"]}]
+  isActive             Boolean     @default(true)
+  orderItems           OrderItem[]
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  @@index([tenantId])
+  @@map("products")
+}
+
+model KnowledgeDocument {
+  id                   String               @id @default(uuid())
+  tenantId             String
+  tenant               Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fileName             String
+  fileUrl              String
+  fileType             String
+  status               String               @default("PROCESSING") // PENDING, PROCESSING, READY, FAILED
+  totalChunks          Int                  @default(0)
+  embeddings           KnowledgeEmbedding[]
+  createdAt            DateTime             @default(now())
+
+  @@map("knowledge_documents")
+}
+
+model KnowledgeEmbedding {
+  id                   String             @id @default(uuid())
+  tenantId             String
+  tenant               Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  documentId           String?
+  document             KnowledgeDocument? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  chunkIndex           Int
+  content              String             @db.Text
+  embedding            Unsupported("vector(768)") // Dimensión nativa para Gemini text-embedding-004
+  metadata             Json               @default("{}")
+  createdAt            DateTime           @default(now())
+
+  @@index([tenantId])
+  @@map("knowledge_embeddings")
+}
+
+// ========================================================
+// 5. CRM: PIPELINE KANBAN, CHAT Y PEDIDOS
+// ========================================================
+
+model CrmPipeline {
+  id                   String      @id @default(uuid())
+  tenantId             String
+  tenant               Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name                 String      @default("Ventas WhatsApp")
+  isDefault            Boolean     @default(true)
+  stages               CrmStage[]
+  createdAt            DateTime    @default(now())
+
+  @@map("crm_pipelines")
+}
+
+model CrmStage {
+  id                   String         @id @default(uuid())
+  pipelineId           String
+  pipeline             CrmPipeline    @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name                 String
+  stageKey             String         // NEW_LEAD, IN_QUERY, AWAITING_PAYMENT, CONFIRMED, COMPLETED, LOST
+  orderIndex           Int            @default(0)
+  color                String         @default("#3B82F6")
+  conversations        Conversation[]
+
+  @@unique([pipelineId, orderIndex])
+  @@map("crm_stages")
+}
+
+model Contact {
+  id                   String         @id @default(uuid())
+  tenantId             String
+  tenant               Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  phoneNumber          String
+  name                 String?
+  email                String?
+  city                 String?
+  address              String?
+  tags                 String[]       @default([])
+  customFields         Json           @default("{}")
+  conversations        Conversation[]
+  orders               Order[]
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  @@unique([tenantId, phoneNumber])
+  @@map("contacts")
+}
+
+enum ConversationStatus {
+  BOT_ACTIVE
+  HUMAN_AGENT
+  CLOSED
+}
+
+model Conversation {
+  id                   String              @id @default(uuid())
+  tenantId             String
+  tenant               Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactId            String
+  contact              Contact             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  stageId              String?
+  stage                CrmStage?           @relation(fields: [stageId], references: [id], onDelete: SetNull)
+  connectionId         String?
+  connection           WhatsAppConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  assignedAgentId      String?
+  assignedAgent        User?               @relation(fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  status               ConversationStatus  @default(BOT_ACTIVE)
+  unreadCount          Int                 @default(0)
+  lastMessageText      String?             @db.Text
+  lastMessageAt        DateTime            @default(now())
+  needsHumanReason     String?             @db.Text
+  isPaymentVerified    Boolean             @default(false)
+  
+  messages             Message[]
+  orders               Order[]
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@index([tenantId, stageId])
+  @@index([tenantId, status])
+  @@map("conversations")
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageSender {
+  CUSTOMER
+  BOT
+  HUMAN_AGENT
+  SYSTEM
+}
+
+enum MessageFormat {
+  TEXT
+  AUDIO
+  IMAGE
+  DOCUMENT
+  LOCATION
+  INTERACTIVE
+  TEMPLATE
+}
+
+enum MessageDeliveryStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+model Message {
+  id                   String                @id @default(uuid())
+  tenantId             String
+  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId       String
+  conversation         Conversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  direction            MessageDirection
+  sender               MessageSender
+  format               MessageFormat         @default(TEXT)
+  body                 String?               @db.Text
+  mediaUrl             String?
+  mediaMimeType        String?
+  transcription        String?               @db.Text
+  visionAnalysis       Json?
+  deliveryStatus       MessageDeliveryStatus @default(SENT)
+  whatsappMessageId    String?
+  promptTokens         Int                   @default(0)
+  completionTokens     Int                   @default(0)
+  createdAt            DateTime              @default(now())
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+enum OrderStatus {
+  DRAFT
+  AWAITING_PAYMENT
+  PAID
+  PREPARING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model Order {
+  id                   String        @id @default(uuid())
+  tenantId             String
+  tenant               Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId       String?
+  conversation         Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  contactId            String
+  contact              Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  status               OrderStatus   @default(DRAFT)
+  subtotal             Decimal       @default(0.00) @db.Decimal(12, 2)
+  deliveryCost         Decimal       @default(0.00) @db.Decimal(12, 2)
+  total                Decimal       @default(0.00) @db.Decimal(12, 2)
+  deliveryAddress      String?
+  deliveryZoneId       String?
+  deliveryZone         DeliveryZone? @relation(fields: [deliveryZoneId], references: [id], onDelete: SetNull)
+  paymentMethod        String?       // NEQUI, BANCOLOMBIA, WOMPI_LINK
+  paymentReference     String?
+  paymentReceiptUrl    String?
+  extractedReceiptData Json?
+  notes                String?       @db.Text
+  orderItems           OrderItem[]
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id                   String        @id @default(uuid())
+  orderId              String
+  order                Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId            String?
+  product              Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName          String
+  unitPrice            Decimal       @db.Decimal(12, 2)
+  quantity             Int           @default(1)
+  subtotal             Decimal       @db.Decimal(12, 2)
+  variantSelected      Json          @default("{}")
+
+  @@map("order_items")
+}
