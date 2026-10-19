@@ -42,7 +42,7 @@ export const crmRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     const { stageId } = request.body as { stageId: string };
 
     const stage = await prisma.crmStage.findFirst({
-      where: { id: stageId, tenantId },
+      where: { id: stageId, pipeline: { tenantId } },
     });
 
     if (!stage) {

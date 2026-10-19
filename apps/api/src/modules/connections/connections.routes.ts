@@ -10,7 +10,7 @@ export const connectionRoutes: FastifyPluginAsync = async (fastify: FastifyInsta
   fastify.get('/connections', async (request, reply) => {
     const tenantId = (request as any).user.tenantId;
 
-    const connections = await prisma.whatsappConnection.findMany({
+    const connections = await prisma.whatsAppConnection.findMany({
       where: { tenantId },
     });
 
@@ -41,7 +41,7 @@ export const connectionRoutes: FastifyPluginAsync = async (fastify: FastifyInsta
     } catch (err: any) {
       console.warn('Microservicio QR no accesible aún o iniciando:', err.message);
       // Actualizar estado en BD a STARTING
-      await prisma.whatsappConnection.upsert({
+      await prisma.whatsAppConnection.upsert({
         where: { tenantId_gatewayType: { tenantId, gatewayType: GatewayProvider.QR_BAILEYS } },
         update: { status: ConnectionStatus.STARTING, sessionId },
         create: {
@@ -68,7 +68,7 @@ export const connectionRoutes: FastifyPluginAsync = async (fastify: FastifyInsta
       return reply.status(400).send({ error: 'Phone_Number_ID y Permanent_Access_Token requeridos.' });
     }
 
-    const connection = await prisma.whatsappConnection.upsert({
+    const connection = await prisma.whatsAppConnection.upsert({
       where: {
         tenantId_gatewayType: {
           tenantId,

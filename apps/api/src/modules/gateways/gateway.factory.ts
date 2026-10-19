@@ -4,7 +4,7 @@ import { MetaCloudApiAdapter } from './meta.adapter';
 import { BaileysAdapter } from './baileys.adapter';
 
 export async function getGatewayForTenant(tenantId: string): Promise<IWhatsAppGateway> {
-  const connection = await prisma.whatsappConnection.findFirst({
+  const connection = await prisma.whatsAppConnection.findFirst({
     where: {
       tenantId,
       status: 'CONNECTED',
@@ -13,7 +13,7 @@ export async function getGatewayForTenant(tenantId: string): Promise<IWhatsAppGa
 
   if (!connection) {
     // Si no hay ninguna conectada aún, intentar obtener la configurada por defecto
-    const anyConn = await prisma.whatsappConnection.findFirst({
+    const anyConn = await prisma.whatsAppConnection.findFirst({
       where: { tenantId },
     });
 

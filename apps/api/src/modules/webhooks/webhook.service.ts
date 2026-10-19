@@ -62,7 +62,7 @@ export async function handleInboundMessage(payload: InboundMessagePayload) {
   if (!conversation) {
     // Asignar etapa inicial de ventas (NEW_LEAD)
     const initialStage = await prisma.crmStage.findFirst({
-      where: { tenantId, stageKey: 'NEW_LEAD' },
+      where: { pipeline: { tenantId }, stageKey: 'NEW_LEAD' },
     });
 
     conversation = await prisma.conversation.create({
@@ -173,7 +173,7 @@ export async function handleBaileysSessionUpdate(payload: {
 }) {
   const { tenantId, status, qrCodeBase64, phoneNumber } = payload;
 
-  await prisma.whatsappConnection.upsert({
+  await prisma.whatsAppConnection.upsert({
     where: {
       tenantId_gatewayType: {
         tenantId,

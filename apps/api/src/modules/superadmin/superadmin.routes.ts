@@ -119,7 +119,6 @@ export const superadminRoutes: FastifyPluginAsync = async (fastify: FastifyInsta
       await prisma.crmStage.create({
         data: {
           pipelineId: pipeline.id,
-          tenantId: tenant.id,
           name: st.name,
           stageKey: st.stageKey,
           orderIndex: st.orderIndex,

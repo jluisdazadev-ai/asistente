@@ -98,7 +98,7 @@ async function main() {
   });
 
   // 5. Configuración de Conexión de WhatsApp por defecto (QR / Baileys)
-  await prisma.whatsappConnection.upsert({
+  await prisma.whatsAppConnection.upsert({
     where: {
       tenantId_gatewayType: {
         tenantId: tenant.id,
@@ -209,7 +209,6 @@ async function main() {
       update: {},
       create: {
         pipelineId: pipeline.id,
-        tenantId: tenant.id,
         name: st.name,
         stageKey: st.stageKey,
         orderIndex: st.orderIndex,

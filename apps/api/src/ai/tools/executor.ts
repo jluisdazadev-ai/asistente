@@ -265,7 +265,7 @@ export async function executeToolCall(
       // Buscar la etapa por clave
       const stage = await prisma.crmStage.findFirst({
         where: {
-          tenantId,
+          pipeline: { tenantId },
           stageKey,
         },
       });

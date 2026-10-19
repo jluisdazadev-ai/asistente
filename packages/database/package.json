@@ -2,8 +2,8 @@
   "name": "@crm/database",
   "version": "1.0.0",
   "private": true,
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
   "scripts": {
     "build": "tsc",
     "db:generate": "sh -c 'cp ../../.env .env 2>/dev/null || cp ../../.env.example .env 2>/dev/null || true; prisma generate'",

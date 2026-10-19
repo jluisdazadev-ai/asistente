@@ -42,7 +42,7 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           const phoneNumberId = metadata?.phone_number_id;
 
           // Buscar el tenant asociado a este Phone Number ID
-          const connection = await prisma.whatsappConnection.findFirst({
+          const connection = await prisma.whatsAppConnection.findFirst({
             where: { phoneNumberId },
           });
 
