@@ -1,5 +1,10 @@
 import { PrismaClient, UserRole, BotTone, GatewayProvider, ConnectionStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import dotenv from 'dotenv';
+import path from 'path';
+
+dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
+dotenv.config();
 
 const prisma = new PrismaClient();
 

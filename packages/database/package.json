@@ -7,13 +7,14 @@
   "scripts": {
     "build": "tsc",
     "db:generate": "prisma generate",
-    "db:push": "prisma db push",
+    "db:push": "sh -c 'test -f .env || test -f ../../.env || cp ../../.env.example ../../.env; prisma db push'",
     "db:migrate": "prisma migrate dev",
     "db:seed": "ts-node src/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
-    "bcryptjs": "^2.4.3"
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.7"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
