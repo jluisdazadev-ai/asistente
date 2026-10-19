@@ -6,10 +6,10 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "db:generate": "prisma generate",
-    "db:push": "sh -c 'test -f .env || test -f ../../.env || cp ../../.env.example ../../.env; prisma db push'",
+    "db:generate": "sh -c 'cp ../../.env .env 2>/dev/null || cp ../../.env.example .env 2>/dev/null || true; prisma generate'",
+    "db:push": "sh -c 'cp ../../.env .env 2>/dev/null || cp ../../.env.example .env 2>/dev/null || true; prisma db push'",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "ts-node src/seed.ts"
+    "db:seed": "sh -c 'cp ../../.env .env 2>/dev/null || cp ../../.env.example .env 2>/dev/null || true; ts-node src/seed.ts'"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

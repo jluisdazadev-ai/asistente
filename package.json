@@ -8,7 +8,7 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently -n \"API,WEB,QR\" -c \"blue,green,magenta\" \"npm run dev -w @crm/api\" \"npm run dev -w @crm/web\" \"npm run dev -w @crm/whatsapp-qr\"",
+    "dev": "npx --yes concurrently -n \"API,WEB,QR\" -c \"blue,green,magenta\" \"npm run dev -w @crm/api\" \"npm run dev -w @crm/web\" \"npm run dev -w @crm/whatsapp-qr\"",
     "build": "npm run build --workspaces --if-present",
     "start": "npm run start --workspaces --if-present",
     "db:generate": "npm run db:generate -w @crm/database",
