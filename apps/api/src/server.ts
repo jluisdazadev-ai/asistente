@@ -26,6 +26,19 @@ async function buildServer() {
     },
   });
 
+  // Soportar cuerpos JSON vacíos de forma segura
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body: string, done) => {
+    if (!body || (typeof body === 'string' && body.trim() === '')) {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(body));
+    } catch (err: any) {
+      done(err, undefined);
+    }
+  });
+
   // CORS
   await app.register(cors, {
     origin: '*',

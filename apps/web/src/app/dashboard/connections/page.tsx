@@ -98,12 +98,17 @@ export default function ConnectionPage() {
     setGeneratingQr(true);
     setQrStatus('STARTING');
     try {
-      const res = await fetchWithAuth('/connections/qr/init', { method: 'POST' });
+      const res = await fetchWithAuth('/connections/qr/init', {
+        method: 'POST',
+        body: JSON.stringify({ forceReset: true }),
+      });
       const data = await res.json();
-      setQrStatus(data.status || 'STARTING');
-      if (data.qrCodeBase64) {
-        setQrCodeBase64(data.qrCodeBase64);
+      const qr = data.qrCodeBase64 || data.connection?.qrCodeBase64;
+      if (qr) {
+        setQrCodeBase64(qr);
         setQrStatus('SCAN_QR');
+      } else if (data.status) {
+        setQrStatus(data.status);
       }
     } catch (err) {
       console.error('Error generando QR:', err);
