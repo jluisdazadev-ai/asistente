@@ -240,6 +240,16 @@ export default function ConnectionPage() {
               <p className="text-xs text-slate-400 max-w-sm mx-auto">
                 El Asistente de IA está activo respondiendo mensajes con el Debounce Buffer y simulador de escritura.
               </p>
+              <div className="pt-2">
+                <button
+                  onClick={handleGenerateQR}
+                  disabled={generatingQr}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 text-xs hover:bg-slate-50 transition-all disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${generatingQr ? 'animate-spin' : ''}`} />
+                  <span>{generatingQr ? 'Generando nuevo QR...' : 'Desvincular o Conectar otra Línea'}</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center py-4 text-center">

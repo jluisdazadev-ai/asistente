@@ -11,6 +11,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   WASocket,
+  Browsers,
 } from '@whiskeysockets/baileys';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
@@ -25,6 +26,7 @@ const activeSessions = new Map<string, WASocket>();
 // Mapa en memoria del último código QR base64 generado
 const latestQrMap = new Map<string, string>();
 const sessionStatusMap = new Map<string, string>();
+const reconnectTimeouts = new Map<string, NodeJS.Timeout>();
 
 const app = Fastify({
   logger: false,
@@ -53,10 +55,19 @@ async function dispatchWebhookToApi(tenantId: string, event: string, data: any) 
 
 // Inicializa o renueva una sesión de WhatsApp
 async function startBaileysSession(tenantId: string, sessionId: string, forceReset = true): Promise<{ status: string; qrCodeBase64?: string }> {
-  // Si ya existía una sesión en memoria, cerrarla para renovar
+  // Cancelar reconexiones pendientes para esta sesión
+  if (reconnectTimeouts.has(sessionId)) {
+    clearTimeout(reconnectTimeouts.get(sessionId)!);
+    reconnectTimeouts.delete(sessionId);
+  }
+
+  // Si ya existía una sesión en memoria, cerrar listeners y socket
   if (activeSessions.has(sessionId)) {
     try {
       const oldSock = activeSessions.get(sessionId);
+      oldSock?.ev.removeAllListeners('connection.update');
+      oldSock?.ev.removeAllListeners('creds.update');
+      oldSock?.ev.removeAllListeners('messages.upsert');
       oldSock?.end(undefined);
     } catch {}
     activeSessions.delete(sessionId);
@@ -74,13 +85,14 @@ async function startBaileysSession(tenantId: string, sessionId: string, forceRes
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
-  let version;
+  let version: any;
   try {
     const v = await fetchLatestBaileysVersion();
     version = v.version;
   } catch {
-    version = [2, 3000, 1015901307] as any;
+    version = [2, 3000, 1043857760];
   }
+  console.log(`📦 [Baileys] Sesión ${sessionId} iniciando con WhatsApp Web v${version.join('.')}`);
 
   sessionStatusMap.set(sessionId, 'STARTING');
 
@@ -92,8 +104,12 @@ async function startBaileysSession(tenantId: string, sessionId: string, forceRes
       logger: pino({ level: 'silent' }),
       printQRInTerminal: true,
       auth: state,
-      browser: ['Ubuntu', 'Chrome', '20.0.04'],
+      browser: typeof Browsers !== 'undefined' ? Browsers.macOS('Desktop') : ['Mac OS', 'Desktop', '14.4.1'],
       syncFullHistory: false,
+      defaultQueryTimeoutMs: undefined,
+      connectTimeoutMs: 60000,
+      keepAliveIntervalMs: 25000,
+      getMessage: async () => undefined,
     });
 
     activeSessions.set(sessionId, sock);
@@ -121,7 +137,8 @@ async function startBaileysSession(tenantId: string, sessionId: string, forceRes
       }
 
       if (connection === 'open') {
-        const phoneNumber = sock.user?.id?.split(':')[0] || '';
+        const rawId = sock.user?.id || '';
+        const phoneNumber = rawId.split(':')[0]?.split('@')[0] || '';
         console.log(`✅ [WhatsApp Conectado] Sesión ${sessionId} vinculada al número: +${phoneNumber}`);
         latestQrMap.delete(sessionId);
         sessionStatusMap.set(sessionId, 'CONNECTED');
@@ -136,16 +153,35 @@ async function startBaileysSession(tenantId: string, sessionId: string, forceRes
           resolve({ status: 'CONNECTED' });
         }
       } else if (connection === 'close') {
-        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode ?? (lastDisconnect?.error as any)?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        console.log(`🔌 [WhatsApp Desconectado] Sesión ${sessionId}. Código: ${statusCode}.`);
+        console.log(`🔌 [WhatsApp Conexión Cerrada] Sesión ${sessionId}. Código: ${statusCode}. ¿Reconectar?: ${shouldReconnect}`);
 
         activeSessions.delete(sessionId);
-        sessionStatusMap.set(sessionId, 'DISCONNECTED');
 
-        await dispatchWebhookToApi(tenantId, 'connection.update', {
-          status: 'DISCONNECTED',
-        });
+        if (shouldReconnect) {
+          console.log(`🔄 [Reconectando] Reanudando sesión ${sessionId} tras código ${statusCode} (manteniendo credenciales)...`);
+          const timer = setTimeout(() => {
+            reconnectTimeouts.delete(sessionId);
+            startBaileysSession(tenantId, sessionId, false);
+          }, 1500);
+          reconnectTimeouts.set(sessionId, timer);
+        } else {
+          console.log(`❌ [Sesión Finalizada] Usuario desconectó sesión ${sessionId} (Logged Out).`);
+          latestQrMap.delete(sessionId);
+          sessionStatusMap.set(sessionId, 'DISCONNECTED');
+
+          const authDir = path.join(process.cwd(), 'baileys_auth_info', sessionId);
+          if (fs.existsSync(authDir)) {
+            try {
+              fs.rmSync(authDir, { recursive: true, force: true });
+            } catch {}
+          }
+
+          await dispatchWebhookToApi(tenantId, 'connection.update', {
+            status: 'DISCONNECTED',
+          });
+        }
       }
     });
 
@@ -159,7 +195,7 @@ async function startBaileysSession(tenantId: string, sessionId: string, forceRes
       }
     });
 
-    // Timeout de 7s por si Baileys tarda en emitir el primer socket update
+    // Timeout de seguridad por si Baileys tarda en emitir el primer socket update
     setTimeout(() => {
       if (!hasResolved) {
         hasResolved = true;
