@@ -57,8 +57,29 @@ export async function processConversationWithAI(options: ProcessInboundPromptOpt
     }
   }
 
-  // 3. Consultar productos, cuentas y zonas para inyectar en el contexto de Gemini
   const isSaasSales = conversation.tenant.slug === 'plataforma-saas';
+
+  // 2.5 Zero-Token FAQ Interceptor: Respuestas directas a consultas estándar (0 tokens consumidos)
+  const normalized = unifiedPromptText.trim().toLowerCase().replace(/[¿?¡!.,]/g, '');
+  if (!isSaasSales) {
+    if (['hola', 'buenas', 'buen dia', 'buenos dias', 'buenas tardes', 'buenas noches', 'saludos', 'hola buenas'].includes(normalized)) {
+      return `¡Hola! 👋 Te damos la bienvenida a *${conversation.tenant.businessName}*. ¿En qué te podemos consentir hoy? Puedes consultar nuestro menú o pedir tu domicilio directamente por aquí.`;
+    }
+
+    if (['cuentas', 'a donde transfiero', 'donde pago', 'medios de pago', 'nequi', 'bancolombia'].includes(normalized)) {
+      const bankAccounts = await prisma.bankAccount.findMany({ where: { tenantId, isActive: true } });
+      if (bankAccounts.length > 0) {
+        const list = bankAccounts.map((b) => `• *${b.bankName}* (${b.accountType}): ${b.accountNumber} - Titular: ${b.holderName}`).join('\n');
+        return `¡Claro! Aquí tienes nuestras cuentas oficiales para transferir:\n\n${list}\n\nCuando realices el pago, por favor envía la captura del comprobante por aquí para confirmarlo con el equipo. 🧾`;
+      }
+    }
+
+    if (['horario', 'horarios', 'a que hora abren', 'que horario tienen', 'abren hoy', 'estan abiertos'].includes(normalized)) {
+      return `¡Hola! Atendemos todos los días. Si deseas hacer tu pedido ahora mismo, indícanos qué te gustaría ordenar de nuestro menú y con gusto te lo alistamos. 🍔`;
+    }
+  }
+
+  // 3. Consultar productos, cuentas y zonas para inyectar en el contexto de Gemini
 
   const [products, bankAccounts, deliveryZones, activePlans] = await Promise.all([
     prisma.product.findMany({
@@ -145,11 +166,11 @@ DIRECTIVAS OPERATIVAS:
 ${botConfig.customSystemPrompt ? `INSTRUCCIONES ADICIONALES DEL DUEÑO:\n${botConfig.customSystemPrompt}` : ''}
 `.trim();
 
-  // 5. Cargar historial reciente de mensajes
+  // 5. Cargar historial reciente de mensajes (Ventana deslizante de 6 mensajes para ahorrar tokens)
   const recentMessages = await prisma.message.findMany({
     where: { conversationId },
     orderBy: { createdAt: 'desc' },
-    take: 10,
+    take: 6,
   });
   recentMessages.reverse();
 

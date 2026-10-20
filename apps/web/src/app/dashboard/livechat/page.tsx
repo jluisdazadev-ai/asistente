@@ -481,18 +481,16 @@ export default function LiveChatPage() {
                       </span>
                     </div>
 
-                    {/* Contenido Visual si es Comprobante de Pago */}
-                    {m.visionAnalysis && m.visionAnalysis.is_valid_receipt && (
-                      <div className="my-2 rounded-lg bg-emerald-100/90 border border-emerald-300 p-2 text-slate-900 text-[11px]">
-                        <div className="font-bold text-emerald-800 flex items-center space-x-1">
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          <span>Comprobante Bancario Detectado:</span>
-                        </div>
-                        <div className="mt-1 space-y-0.5 text-[10px]">
-                          <div>• Banco: <strong>{m.visionAnalysis.bank_name}</strong></div>
-                          <div>• Monto: <strong>${Number(m.visionAnalysis.amount).toLocaleString('es-CO')} COP</strong></div>
-                          <div>• Ref: <strong>{m.visionAnalysis.reference_code}</strong></div>
-                        </div>
+                    {/* Imagen o Comprobante de Pago Recibido */}
+                    {m.mediaUrl && (
+                      <div className="my-2">
+                        <img
+                          src={m.mediaUrl}
+                          alt="Comprobante o Imagen"
+                          className="rounded-lg max-h-56 object-contain border border-slate-200 cursor-pointer hover:opacity-90 transition-opacity bg-white p-1 shadow-xs"
+                          onClick={() => window.open(m.mediaUrl, '_blank')}
+                        />
+                        <span className="text-[10px] text-slate-400 block mt-1">🔍 Haz clic para abrir en pantalla completa</span>
                       </div>
                     )}
 

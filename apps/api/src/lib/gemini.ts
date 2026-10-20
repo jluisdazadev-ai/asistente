@@ -30,6 +30,7 @@ export function getGeminiModel(options?: {
       systemInstruction: options?.systemInstruction,
       generationConfig: {
         temperature: options?.temperature ?? 0.4,
+        maxOutputTokens: 250,
       },
       tools: options?.tools,
     },

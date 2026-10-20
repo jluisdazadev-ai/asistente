@@ -272,25 +272,30 @@ export default function OrdersPage() {
                       </div>
                     </div>
 
-                    {/* Desglose de Comprobante Extraído */}
-                    {o.extractedReceiptData && (
+                    {/* Desglose de Comprobante / Foto para Verificación Humana */}
+                    {o.paymentReceiptUrl && (
                       <div className="mt-3 p-2.5 bg-amber-50/90 rounded-lg border border-amber-200 text-xs">
-                        <div className="font-bold text-amber-900 flex items-center justify-between text-[11px]">
-                          <span>Comprobante Detectado (Gemini)</span>
-                          {o.paymentReceiptUrl && (
-                            <button
-                              onClick={() => setPreviewReceiptUrl(o.paymentReceiptUrl!)}
-                              className="text-amber-700 hover:text-amber-900 underline flex items-center space-x-0.5"
-                            >
-                              <Eye className="h-3 w-3" />
-                              <span>Ver Foto</span>
-                            </button>
-                          )}
+                        <div className="font-bold text-amber-900 flex items-center justify-between text-[11px] mb-1.5">
+                          <span>Comprobante de Transferencia:</span>
+                          <button
+                            onClick={() => setPreviewReceiptUrl(o.paymentReceiptUrl!)}
+                            className="text-amber-800 hover:text-amber-950 font-bold underline flex items-center space-x-1 bg-amber-100 px-2 py-0.5 rounded"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            <span>Ver Foto Completa</span>
+                          </button>
                         </div>
-                        <div className="mt-1 space-y-0.5 text-[11px] text-slate-700">
-                          <div>• Banco: <strong>{o.extractedReceiptData.bank_name || o.paymentMethod}</strong></div>
-                          <div>• Monto: <strong>${Number(o.extractedReceiptData.amount || o.total).toLocaleString('es-CO')} COP</strong></div>
-                          <div>• Referencia: <strong>{o.extractedReceiptData.reference_code || o.paymentReference || 'N/A'}</strong></div>
+                        <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setPreviewReceiptUrl(o.paymentReceiptUrl!)}>
+                          <img
+                            src={o.paymentReceiptUrl}
+                            alt="Comprobante"
+                            className="w-16 h-16 object-cover rounded-lg border border-amber-300 shadow-xs hover:opacity-80 transition-opacity"
+                          />
+                          <div className="text-[11px] text-slate-700 space-y-0.5">
+                            <div>• Verifica el valor en tu app bancaria</div>
+                            <div>• Haz clic en la foto para ampliar</div>
+                            <div>• Presiona Aprobar Pago abajo</div>
+                          </div>
                         </div>
                       </div>
                     )}
