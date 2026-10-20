@@ -36,32 +36,23 @@ export async function addMessageToDebounceBuffer(params: {
   await redisConnection.rpush(bufferKey, snippet);
   await redisConnection.expire(bufferKey, 120); // TTL de seguridad
 
-  const debounceDelayMs = (params.debounceSeconds || 6) * 1000;
-  const jobId = `debounce:${conversationId}`;
+  const debounceDelayMs = (params.debounceSeconds || 5) * 1000;
+  const now = Date.now();
+  await redisConnection.set(`crm:last_active:${conversationId}`, now.toString());
 
-  // 2. Si ya existía un trabajo pendiente para esta conversación, cancelarlo para resetear el reloj
-  try {
-    const existingJob = await debounceQueue.getJob(jobId);
-    if (existingJob) {
-      await existingJob.remove();
-    }
-  } catch (err) {
-    // Si ya estaba en proceso o no existe, continuar
-  }
-
-  // 3. Crear el nuevo trabajo demorado
+  // Crear el nuevo trabajo demorado con ID único para evitar deduplicación accidental en BullMQ
   await debounceQueue.add(
     'process-buffer',
     { tenantId, conversationId, contactId, recipientPhone },
     {
-      jobId,
+      jobId: `debounce:${conversationId}:${now}`,
       delay: debounceDelayMs,
       removeOnComplete: true,
       removeOnFail: true,
     }
   );
 
-  console.log(`⏳ [Debounce Buffer] Mensaje acumulado para conversación ${conversationId}. Temporizador reiniciado a ${debounceDelayMs}ms.`);
+  console.log(`⏳ [Debounce Buffer] Mensaje acumulado para conv ${conversationId}. Ventana programada a ${debounceDelayMs}ms.`);
 }
 
 /**
@@ -73,9 +64,20 @@ export const debounceWorker = new Worker<InboundBufferData>(
     const { tenantId, conversationId, contactId, recipientPhone } = job.data;
     const bufferKey = `crm:buffer:${conversationId}`;
 
+    // Validar ventana deslizante: si hay un mensaje recibido más recientemente, delegar al nuevo job
+    const lastActiveStr = await redisConnection.get(`crm:last_active:${conversationId}`);
+    if (lastActiveStr) {
+      const lastActive = parseInt(lastActiveStr, 10);
+      if (Date.now() - lastActive < 3500) {
+        console.log(`⏳ [Debounce Buffer] Ráfaga activa en conv ${conversationId}. Pospuesto para agrupar.`);
+        return;
+      }
+    }
+
     // 1. Extraer todos los fragmentos acumulados
     const rawMessages = await redisConnection.lrange(bufferKey, 0, -1);
     await redisConnection.del(bufferKey);
+    await redisConnection.del(`crm:last_active:${conversationId}`);
 
     if (!rawMessages || rawMessages.length === 0) {
       return;

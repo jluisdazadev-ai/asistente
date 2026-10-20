@@ -37,7 +37,7 @@ app.register(cors, { origin: '*' });
 // Helper para despachar webhooks hacia la API principal
 async function dispatchWebhookToApi(tenantId: string, event: string, data: any) {
   try {
-    await axios.post(
+    const res = await axios.post(
       `${API_URL}/api/webhooks/baileys`,
       { tenantId, event, data },
       {
@@ -48,6 +48,7 @@ async function dispatchWebhookToApi(tenantId: string, event: string, data: any) 
         timeout: 8000,
       }
     );
+    console.log(`📡 [Webhook Despachado] Evento "${event}" entregado a la API principal (status ${res.status})`);
   } catch (err: any) {
     console.warn(`⚠️ Error notificando webhook a la API principal (${event}):`, err.message);
   }
@@ -186,9 +187,13 @@ async function startBaileysSession(tenantId: string, sessionId: string, forceRes
     });
 
     sock.ev.on('messages.upsert', async (m) => {
-      if (m.type !== 'notify') return;
-      for (const msg of m.messages) {
-        if (msg.key.fromMe) continue;
+      console.log(`📩 [Baileys Event] messages.upsert recibido (tipo: ${m.type}, cantidad: ${m.messages?.length || 0})`);
+      for (const msg of m.messages || []) {
+        if (msg.key.fromMe) {
+          console.log(`⏭️ [Baileys] Mensaje saliente propio ignorado (fromMe)`);
+          continue;
+        }
+        console.log(`➡️ [Baileys] Mensaje entrante de ${msg.key.remoteJid}. Despachando a la API...`);
         await dispatchWebhookToApi(tenantId, 'messages.upsert', {
           message: msg,
         });
@@ -256,11 +261,15 @@ app.post('/sessions/:sessionId/messages/text', async (request, reply) => {
 
   const sock = activeSessions.get(sessionId);
   if (!sock) {
+    console.error(`❌ [Baileys Send] Sesión ${sessionId} no encontrada en memoria (activeSessions)`);
     return reply.status(400).send({ error: `La sesión ${sessionId} no está conectada.` });
   }
 
-  const jid = `${recipient}@s.whatsapp.net`;
+  const cleanRecipient = recipient.replace(/[^0-9]/g, '');
+  const jid = `${cleanRecipient}@s.whatsapp.net`;
+  console.log(`📤 [Baileys Send] Enviando mensaje a ${jid}: "${text.substring(0, 40)}..."`);
   const sent = await sock.sendMessage(jid, { text });
+  console.log(`✅ [Baileys Send] Mensaje enviado con éxito. ID: ${sent?.key.id}`);
 
   return reply.send({ success: true, messageId: sent?.key.id });
 });
@@ -307,10 +316,33 @@ app.post('/sessions/:sessionId/messages/media', async (request, reply) => {
   return reply.send({ success: true, messageId: sent?.key.id });
 });
 
-app.listen({ port: PORT, host: '0.0.0.0' }, (err, address) => {
+// Restaurar automáticamente sesiones guardadas al arrancar el microservicio
+async function autoRestoreSavedSessions() {
+  const authRoot = path.join(process.cwd(), 'baileys_auth_info');
+  if (!fs.existsSync(authRoot)) return;
+
+  const sessionDirs = fs.readdirSync(authRoot);
+  for (const sessionId of sessionDirs) {
+    const credsPath = path.join(authRoot, sessionId, 'creds.json');
+    if (fs.existsSync(credsPath)) {
+      const tenantId = sessionId.replace('session_', '');
+      console.log(`♻️ [Auto-Restore] Restaurando sesión de WhatsApp guardada en disco: ${sessionId}...`);
+      try {
+        startBaileysSession(tenantId, sessionId, false).catch((err) => {
+          console.warn(`⚠️ Error en restauración de sesión ${sessionId}:`, err.message);
+        });
+      } catch (err: any) {
+        console.warn(`⚠️ Error iniciando restauración de sesión ${sessionId}:`, err.message);
+      }
+    }
+  }
+}
+
+app.listen({ port: PORT, host: '0.0.0.0' }, async (err, address) => {
   if (err) {
     console.error('Error al arrancar microservicio Baileys:', err);
     process.exit(1);
   }
   console.log(`⚡ [Microservicio Baileys QR] Escuchando en ${address}`);
+  await autoRestoreSavedSessions();
 });

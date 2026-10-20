@@ -1,13 +1,17 @@
 import { GoogleGenerativeAI, Part } from '@google/generative-ai';
 import { config } from '../config';
 
-const genAI = new GoogleGenerativeAI(config.gemini.apiKey || 'MOCK_KEY_FOR_DEV');
+function getGenAI(): GoogleGenerativeAI {
+  const apiKey = process.env.GEMINI_API_KEY || config.gemini.apiKey || 'MOCK_KEY_FOR_DEV';
+  return new GoogleGenerativeAI(apiKey);
+}
 
 export function getGeminiModel(options?: {
   systemInstruction?: string;
   temperature?: number;
   tools?: any[];
 }) {
+  const genAI = getGenAI();
   return genAI.getGenerativeModel({
     model: config.gemini.model,
     systemInstruction: options?.systemInstruction,
@@ -23,7 +27,7 @@ export function getGeminiModel(options?: {
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
   try {
-    const embeddingModel = genAI.getGenerativeModel({ model: config.gemini.embeddingModel });
+    const embeddingModel = getGenAI().getGenerativeModel({ model: config.gemini.embeddingModel });
     const result = await embeddingModel.embedContent(text);
     return result.embedding.values;
   } catch (error: any) {
@@ -37,7 +41,7 @@ export async function generateEmbedding(text: string): Promise<number[]> {
  * Analiza un comprobante bancario o imagen con Gemini Vision
  */
 export async function analyzeReceiptImage(imageBase64: string, mimeType: string = 'image/jpeg') {
-  const model = genAI.getGenerativeModel({
+  const model = getGenAI().getGenerativeModel({
     model: config.gemini.model,
     generationConfig: {
       temperature: 0.1,

@@ -99,16 +99,33 @@ ${botConfig.customSystemPrompt ? `INSTRUCCIONES ADICIONALES DEL DUEÑO:\n${botCo
   });
   recentMessages.reverse();
 
-  // Mapear historial al formato de Gemini
-  const contentsHistory: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+  // Mapear historial al formato de Gemini garantizando alternancia estricta (user -> model)
+  const sanitizedHistory: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
 
-  for (const msg of recentMessages) {
-    if (!msg.body) continue;
-    const role = msg.sender === MessageSender.CUSTOMER ? 'user' : 'model';
-    contentsHistory.push({
-      role,
-      parts: [{ text: msg.body }],
-    });
+  // Excluimos el último mensaje ya que se envía como prompt activo en chat.sendMessage
+  const historyPool = recentMessages.slice(0, -1);
+
+  for (const msg of historyPool) {
+    if (!msg.body || msg.body.trim().length === 0) continue;
+    const role: 'user' | 'model' = msg.sender === MessageSender.CUSTOMER ? 'user' : 'model';
+
+    if (sanitizedHistory.length === 0) {
+      if (role !== 'user') continue; // El primer turno en Gemini debe ser 'user'
+      sanitizedHistory.push({ role: 'user', parts: [{ text: msg.body }] });
+      continue;
+    }
+
+    const last = sanitizedHistory[sanitizedHistory.length - 1];
+    if (last.role === role) {
+      last.parts[0].text += `\n${msg.body}`;
+    } else {
+      sanitizedHistory.push({ role, parts: [{ text: msg.body }] });
+    }
+  }
+
+  // Si el historial termina en 'user', retirarlo para que no haya dos 'user' seguidos con sendMessage
+  if (sanitizedHistory.length > 0 && sanitizedHistory[sanitizedHistory.length - 1].role === 'user') {
+    sanitizedHistory.pop();
   }
 
   // 5. Inicializar modelo de Gemini con Function Calling
@@ -119,7 +136,7 @@ ${botConfig.customSystemPrompt ? `INSTRUCCIONES ADICIONALES DEL DUEÑO:\n${botCo
   });
 
   const chat = model.startChat({
-    history: contentsHistory.slice(0, -1), // dejamos el último turno afuera si ya estaba en BD
+    history: sanitizedHistory,
   });
 
   try {
