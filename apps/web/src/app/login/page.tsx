@@ -23,7 +23,13 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json();
+      let data: any = {};
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('El backend API (puerto 4000) no está respondiendo o se está reiniciando.');
+      }
+
       if (!res.ok) {
         throw new Error(data.error || 'Credenciales inválidas');
       }
