@@ -26,7 +26,10 @@ async function buildServer() {
     },
   });
 
-  // Soportar cuerpos JSON vacíos de forma segura
+  // Soportar cuerpos JSON vacíos de forma segura reemplazando el parser nativo
+  try {
+    app.removeContentTypeParser('application/json');
+  } catch {}
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body: string, done) => {
     if (!body || (typeof body === 'string' && body.trim() === '')) {
       done(null, {});
