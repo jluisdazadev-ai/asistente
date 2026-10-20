@@ -113,32 +113,44 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
         const msg = data.message;
         if (!msg || msg.key.fromMe) return; // ignorar mensajes enviados por el propio bot
 
-        const senderPhone = msg.key.remoteJid?.split('@')[0] || '';
+        const remoteJid = msg.key.remoteJid || '';
+        // Ignorar estados de WhatsApp y grupos para no saturar al bot
+        if (remoteJid.endsWith('@g.us') || remoteJid === 'status@broadcast') return;
+
+        const senderPhone = remoteJid.split('@')[0].split(':')[0];
         const pushName = msg.pushName;
+
+        let m = msg.message;
+        if (m?.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+        if (m?.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+        if (m?.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+        if (m?.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
 
         let format: 'TEXT' | 'AUDIO' | 'IMAGE' | 'DOCUMENT' = 'TEXT';
         let text = '';
         let mediaBuffer: Buffer | undefined = undefined;
         let mediaMimeType: string | undefined = undefined;
 
-        if (msg.message?.conversation) {
-          text = msg.message.conversation;
-        } else if (msg.message?.extendedTextMessage?.text) {
-          text = msg.message.extendedTextMessage.text;
-        } else if (msg.message?.imageMessage) {
+        if (m?.conversation) {
+          text = m.conversation;
+        } else if (m?.extendedTextMessage?.text) {
+          text = m.extendedTextMessage.text;
+        } else if (m?.imageMessage) {
           format = 'IMAGE';
-          text = msg.message.imageMessage.caption || '';
-          mediaMimeType = msg.message.imageMessage.mimetype || 'image/jpeg';
+          text = m.imageMessage.caption || '';
+          mediaMimeType = m.imageMessage.mimetype || 'image/jpeg';
           if (data.mediaBase64) {
             mediaBuffer = Buffer.from(data.mediaBase64, 'base64');
           }
-        } else if (msg.message?.audioMessage) {
+        } else if (m?.audioMessage) {
           format = 'AUDIO';
-          mediaMimeType = msg.message.audioMessage.mimetype || 'audio/ogg';
+          mediaMimeType = m.audioMessage.mimetype || 'audio/ogg';
           if (data.mediaBase64) {
             mediaBuffer = Buffer.from(data.mediaBase64, 'base64');
           }
         }
+
+        console.log(`📩 [WhatsApp Inbound] Mensaje recibido de +${senderPhone} (${format}): "${text || '[multimedia]'}"`);
 
         await handleInboundMessage({
           tenantId,
