@@ -14,10 +14,11 @@ export interface InboundMessagePayload {
   mediaUrl?: string;
   mediaMimeType?: string;
   whatsappMessageId?: string;
+  senderJid?: string;
 }
 
 export async function handleInboundMessage(payload: InboundMessagePayload) {
-  const { tenantId, senderPhone, senderName, format, text, mediaBuffer, mediaMimeType, whatsappMessageId } = payload;
+  const { tenantId, senderPhone, senderJid, senderName, format, text, mediaBuffer, mediaMimeType, whatsappMessageId } = payload;
   const cleanPhone = senderPhone.replace(/[^0-9]/g, '');
 
   // 1. Obtener o crear Contacto
@@ -30,18 +31,25 @@ export async function handleInboundMessage(payload: InboundMessagePayload) {
     },
   });
 
+  const existingCustomFields = (contact?.customFields as Record<string, any>) || {};
+  const updatedCustomFields = senderJid ? { ...existingCustomFields, jid: senderJid } : existingCustomFields;
+
   if (!contact) {
     contact = await prisma.contact.create({
       data: {
         tenantId,
         phoneNumber: cleanPhone,
         name: senderName || `WhatsApp ${cleanPhone.slice(-4)}`,
+        customFields: updatedCustomFields,
       },
     });
-  } else if (senderName && contact.name?.startsWith('WhatsApp ')) {
+  } else {
     contact = await prisma.contact.update({
       where: { id: contact.id },
-      data: { name: senderName },
+      data: {
+        ...(senderName && contact.name?.startsWith('WhatsApp ') ? { name: senderName } : {}),
+        customFields: updatedCustomFields,
+      },
     });
   }
 
@@ -150,7 +158,7 @@ export async function handleInboundMessage(payload: InboundMessagePayload) {
       tenantId,
       conversationId: conversation.id,
       contactId: contact.id,
-      recipientPhone: cleanPhone,
+      recipientPhone: senderJid || cleanPhone,
       messageId: savedMessage.id,
       snippet: textSnippetForAI,
       debounceSeconds,

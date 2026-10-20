@@ -12,12 +12,12 @@ export class BaileysAdapter implements IWhatsAppGateway {
   }
 
   async sendMessage(options: SendMessageOptions): Promise<{ messageId: string }> {
-    const formattedPhone = options.recipient.replace(/[^0-9]/g, '');
+    const recipient = options.recipient.trim();
 
     const response = await axios.post(
       `${this.serviceUrl}/sessions/${this.sessionId}/messages/text`,
       {
-        recipient: formattedPhone,
+        recipient,
         text: options.text,
       },
       {
@@ -33,12 +33,12 @@ export class BaileysAdapter implements IWhatsAppGateway {
   }
 
   async sendMedia(options: SendMediaOptions): Promise<{ messageId: string }> {
-    const formattedPhone = options.recipient.replace(/[^0-9]/g, '');
+    const recipient = options.recipient.trim();
 
     const response = await axios.post(
       `${this.serviceUrl}/sessions/${this.sessionId}/messages/media`,
       {
-        recipient: formattedPhone,
+        recipient,
         mediaUrl: options.mediaUrl,
         mimeType: options.mimeType,
         caption: options.caption,
@@ -56,12 +56,11 @@ export class BaileysAdapter implements IWhatsAppGateway {
   }
 
   async sendPresence(recipient: string, state: 'composing' | 'recording' | 'paused'): Promise<void> {
-    const formattedPhone = recipient.replace(/[^0-9]/g, '');
     try {
       await axios.post(
         `${this.serviceUrl}/sessions/${this.sessionId}/presence`,
         {
-          recipient: formattedPhone,
+          recipient: recipient.trim(),
           state,
         },
         {

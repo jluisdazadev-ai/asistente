@@ -129,28 +129,36 @@ ${botConfig.customSystemPrompt ? `INSTRUCCIONES ADICIONALES DEL DUEÑO:\n${botCo
   }
 
   // 5. Inicializar modelo de Gemini con Function Calling
-  const model = getGeminiModel({
-    systemInstruction,
-    temperature: Number(botConfig.temperature),
-    tools: [{ functionDeclarations: aiFunctionDeclarations }],
-  });
-
-  const chat = model.startChat({
-    history: sanitizedHistory,
-  });
-
   try {
+    const model = getGeminiModel({
+      systemInstruction,
+      temperature: Number(botConfig.temperature),
+      tools: [{ functionDeclarations: aiFunctionDeclarations }],
+    });
+
+    const chat = model.startChat({
+      history: sanitizedHistory,
+    });
+
     let result = await chat.sendMessage(unifiedPromptText);
     let response = result.response;
 
-    // Ciclo de Function Calling (máximo 5 iteraciones de herramientas)
+    // Helper seguro para obtener functionCalls
+    const extractCalls = (res: any) => {
+      if (typeof res.functionCalls === 'function') return res.functionCalls() || [];
+      return res.functionCalls || [];
+    };
+
+    let calls = extractCalls(response);
     let maxLoops = 5;
-    while (response.functionCalls() && response.functionCalls()!.length > 0 && maxLoops > 0) {
+
+    while (calls.length > 0 && maxLoops > 0) {
       maxLoops--;
-      const functionCalls = response.functionCalls()!;
+      console.log(`🤖 [Gemini Function Call] Disparando ${calls.length} herramientas...`);
       const functionResponses: any[] = [];
 
-      for (const call of functionCalls) {
+      for (const call of calls) {
+        console.log(`🔧 [Tool Ejecutada] ${call.name} con parámetros:`, JSON.stringify(call.args));
         const executionOutput = await executeToolCall(
           tenantId,
           conversationId,
@@ -167,15 +175,43 @@ ${botConfig.customSystemPrompt ? `INSTRUCCIONES ADICIONALES DEL DUEÑO:\n${botCo
         });
       }
 
-      // Enviar resultado de las herramientas al modelo
       result = await chat.sendMessage(functionResponses);
       response = result.response;
+      calls = extractCalls(response);
     }
 
-    const replyText = response.text();
+    let replyText = '';
+    try {
+      replyText = response.text();
+    } catch {
+      const candidate = response.candidates?.[0];
+      const textParts = candidate?.content?.parts?.filter((p: any) => p.text)?.map((p: any) => p.text);
+      replyText = textParts?.join('\n') || '';
+    }
+
     return replyText;
   } catch (err: any) {
-    console.error('Error durante la orquestación de Gemini con Tools:', err);
-    return '¡Hola! He recibido tu mensaje pero tuve un pequeño inconveniente procesándolo. En un momento un asesor te atenderá.';
+    console.error('⚠️ [Error Gemini con Tools]:', err.message || err);
+
+    // Fallback conversacional sin herramientas
+    try {
+      console.log('🔄 [Gemini Fallback] Intentando generar respuesta conversacional directa sin herramientas...');
+      const fallbackModel = getGeminiModel({
+        systemInstruction,
+        temperature: Number(botConfig.temperature),
+      });
+
+      const fallbackChat = fallbackModel.startChat({
+        history: sanitizedHistory,
+      });
+
+      const fallbackResult = await fallbackChat.sendMessage(unifiedPromptText);
+      const reply = fallbackResult.response.text();
+      console.log(`✅ [Gemini Fallback Exitoso]: "${reply.substring(0, 50)}..."`);
+      return reply;
+    } catch (fallbackErr: any) {
+      console.error('❌ [Error Gemini Fallback Crítico]:', fallbackErr.message || fallbackErr);
+      return '¡Hola! He recibido tu mensaje pero tuve un pequeño inconveniente procesándolo. En un momento un asesor te atenderá.';
+    }
   }
 }

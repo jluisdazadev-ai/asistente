@@ -19,9 +19,9 @@ export const config = {
 
   // Gemini AI
   gemini: {
-    apiKey: process.env.GEMINI_API_KEY || '',
-    model: process.env.GEMINI_MODEL || 'gemini-1.5-flash',
-    embeddingModel: process.env.GEMINI_EMBEDDING_MODEL || 'text-embedding-004',
+    apiKey: (process.env.GEMINI_API_KEY || '').replace(/["']/g, '').trim(),
+    model: (process.env.GEMINI_MODEL || 'gemini-1.5-flash').replace(/["']/g, '').trim(),
+    embeddingModel: (process.env.GEMINI_EMBEDDING_MODEL || 'text-embedding-004').replace(/["']/g, '').trim(),
   },
 
   // Meta Cloud API

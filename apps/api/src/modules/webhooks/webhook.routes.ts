@@ -113,11 +113,15 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
         const msg = data.message;
         if (!msg || msg.key.fromMe) return; // ignorar mensajes enviados por el propio bot
 
-        const remoteJid = msg.key.remoteJid || '';
+        const remoteJid = msg.key.remoteJid || data.remoteJid || '';
         // Ignorar estados de WhatsApp y grupos para no saturar al bot
         if (remoteJid.endsWith('@g.us') || remoteJid === 'status@broadcast') return;
 
-        const senderPhone = remoteJid.split('@')[0].split(':')[0];
+        let senderPhone = data.resolvedPhone || remoteJid.split('@')[0].split(':')[0];
+        const altJid = (msg.key as any)?.remoteJidAlt || (msg.key as any)?.senderPn;
+        if (!data.resolvedPhone && remoteJid.endsWith('@lid') && altJid && typeof altJid === 'string' && altJid.includes('@s.whatsapp.net')) {
+          senderPhone = altJid.split('@')[0].split(':')[0];
+        }
         const pushName = msg.pushName;
 
         let m = msg.message;
@@ -150,11 +154,12 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
           }
         }
 
-        console.log(`📩 [WhatsApp Inbound] Mensaje recibido de +${senderPhone} (${format}): "${text || '[multimedia]'}"`);
+        console.log(`📩 [WhatsApp Inbound] Mensaje recibido de ${remoteJid} (tel: +${senderPhone}) [${format}]: "${text || '[multimedia]'}"`);
 
         await handleInboundMessage({
           tenantId,
           senderPhone,
+          senderJid: remoteJid,
           senderName: pushName,
           format,
           text,

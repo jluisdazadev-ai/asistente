@@ -10,6 +10,7 @@ import { catalogRoutes } from './modules/catalog/catalog.routes';
 import { crmRoutes } from './modules/crm/crm.routes';
 import { connectionRoutes } from './modules/connections/connections.routes';
 import { webhookRoutes } from './modules/webhooks/webhook.routes';
+import { getGeminiModel } from './lib/gemini';
 import './queues/debounce.queue';
 import './queues/outbound.queue';
 
@@ -80,6 +81,26 @@ async function buildServer() {
     service: 'whatsapp-ai-crm-api',
     timestamp: new Date().toISOString(),
   }));
+
+  // Endpoint de diagnóstico directo para Gemini
+  app.get('/api/health/gemini', async (request, reply) => {
+    try {
+      const model = getGeminiModel();
+      const res = await model.generateContent('Responde solo "OK"');
+      return {
+        status: 'ok',
+        model: config.gemini.model,
+        reply: res.response.text(),
+        timestamp: new Date().toISOString(),
+      };
+    } catch (err: any) {
+      return reply.status(500).send({
+        status: 'error',
+        model: config.gemini.model,
+        error: err.message || String(err),
+      });
+    }
+  });
 
   return app;
 }

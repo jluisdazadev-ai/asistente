@@ -192,9 +192,20 @@ async function startBaileysSession(tenantId: string, sessionId: string, forceRes
           console.log(`⏭️ [Baileys] Mensaje saliente propio ignorado (fromMe)`);
           continue;
         }
-        console.log(`➡️ [Baileys] Mensaje entrante de ${msg.key.remoteJid}. Despachando a la API...`);
+        const remoteJid = msg.key.remoteJid || '';
+        console.log(`➡️ [Baileys] Mensaje entrante de ${remoteJid}. Despachando a la API...`);
+
+        // Extraer número de teléfono alternativo si viene por LID
+        let resolvedPhone: string | undefined;
+        const altJid = (msg.key as any)?.remoteJidAlt || (msg.key as any)?.senderPn;
+        if (altJid && typeof altJid === 'string' && altJid.includes('@s.whatsapp.net')) {
+          resolvedPhone = altJid.split('@')[0];
+        }
+
         await dispatchWebhookToApi(tenantId, 'messages.upsert', {
           message: msg,
+          remoteJid,
+          resolvedPhone,
         });
       }
     });
@@ -250,6 +261,19 @@ app.get('/sessions/:sessionId/qr', async (request, reply) => {
   });
 });
 
+function buildTargetJid(recipient: string): string {
+  const clean = (recipient || '').trim();
+  if (clean.includes('@')) {
+    return clean;
+  }
+  const digits = clean.replace(/[^0-9]/g, '');
+  // Si tiene 14 o más dígitos y comienza por 20, es un WhatsApp Linked Device ID (LID)
+  if (digits.length >= 14 && digits.startsWith('20')) {
+    return `${digits}@lid`;
+  }
+  return `${digits}@s.whatsapp.net`;
+}
+
 // 3. Enviar mensaje de texto
 app.post('/sessions/:sessionId/messages/text', async (request, reply) => {
   const secret = request.headers['x-service-secret'];
@@ -264,11 +288,10 @@ app.post('/sessions/:sessionId/messages/text', async (request, reply) => {
     return reply.status(400).send({ error: `La sesión ${sessionId} no está conectada.` });
   }
 
-  const cleanRecipient = recipient.replace(/[^0-9]/g, '');
-  const jid = `${cleanRecipient}@s.whatsapp.net`;
-  console.log(`📤 [Baileys Send] Enviando mensaje a ${jid}: "${text.substring(0, 40)}..."`);
-  const sent = await sock.sendMessage(jid, { text });
-  console.log(`✅ [Baileys Send] Mensaje enviado con éxito. ID: ${sent?.key.id}`);
+  const targetJid = buildTargetJid(recipient);
+  console.log(`📤 [Baileys Send] Enviando mensaje a ${targetJid}: "${text.substring(0, 40)}..."`);
+  const sent = await sock.sendMessage(targetJid, { text });
+  console.log(`✅ [Baileys Send] Mensaje enviado con éxito a ${targetJid}. ID: ${sent?.key.id}`);
 
   return reply.send({ success: true, messageId: sent?.key.id });
 });
@@ -283,8 +306,8 @@ app.post('/sessions/:sessionId/presence', async (request, reply) => {
 
   const sock = activeSessions.get(sessionId);
   if (sock) {
-    const jid = `${recipient}@s.whatsapp.net`;
-    await sock.sendPresenceUpdate(state, jid);
+    const targetJid = buildTargetJid(recipient);
+    await sock.sendPresenceUpdate(state, targetJid);
   }
 
   return reply.send({ success: true });
@@ -301,15 +324,15 @@ app.post('/sessions/:sessionId/messages/media', async (request, reply) => {
   const sock = activeSessions.get(sessionId);
   if (!sock) return reply.status(400).send({ error: 'Sesión no conectada' });
 
-  const jid = `${recipient}@s.whatsapp.net`;
+  const targetJid = buildTargetJid(recipient);
 
   let sent;
   if (mimeType.startsWith('image/')) {
-    sent = await sock.sendMessage(jid, { image: { url: mediaUrl }, caption });
+    sent = await sock.sendMessage(targetJid, { image: { url: mediaUrl }, caption });
   } else if (mimeType.startsWith('audio/')) {
-    sent = await sock.sendMessage(jid, { audio: { url: mediaUrl }, ptt: true });
+    sent = await sock.sendMessage(targetJid, { audio: { url: mediaUrl }, ptt: true });
   } else {
-    sent = await sock.sendMessage(jid, { document: { url: mediaUrl }, mimetype: mimeType, fileName: caption || 'archivo' });
+    sent = await sock.sendMessage(targetJid, { document: { url: mediaUrl }, mimetype: mimeType, fileName: caption || 'archivo' });
   }
 
   return reply.send({ success: true, messageId: sent?.key.id });

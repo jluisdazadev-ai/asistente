@@ -2,8 +2,12 @@ import { GoogleGenerativeAI, Part } from '@google/generative-ai';
 import { config } from '../config';
 
 function getGenAI(): GoogleGenerativeAI {
-  const apiKey = process.env.GEMINI_API_KEY || config.gemini.apiKey || 'MOCK_KEY_FOR_DEV';
-  return new GoogleGenerativeAI(apiKey);
+  const rawKey = process.env.GEMINI_API_KEY || config.gemini.apiKey || '';
+  const apiKey = rawKey.replace(/["']/g, '').trim();
+  if (!apiKey || apiKey === 'AIzaSy_TU_LLAVE_DE_GEMINI_AQUI') {
+    console.warn('⚠️ [Gemini] GEMINI_API_KEY no está configurada o contiene el placeholder de ejemplo en .env');
+  }
+  return new GoogleGenerativeAI(apiKey || 'MOCK_KEY_FOR_DEV');
 }
 
 export function getGeminiModel(options?: {
@@ -12,14 +16,17 @@ export function getGeminiModel(options?: {
   tools?: any[];
 }) {
   const genAI = getGenAI();
-  return genAI.getGenerativeModel({
-    model: config.gemini.model,
-    systemInstruction: options?.systemInstruction,
-    generationConfig: {
-      temperature: options?.temperature ?? 0.4,
+  return genAI.getGenerativeModel(
+    {
+      model: config.gemini.model,
+      systemInstruction: options?.systemInstruction,
+      generationConfig: {
+        temperature: options?.temperature ?? 0.4,
+      },
+      tools: options?.tools,
     },
-    tools: options?.tools,
-  });
+    { apiVersion: 'v1beta' }
+  );
 }
 
 /**

@@ -122,8 +122,9 @@ export const crmRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     const gateway = await getGatewayForTenant(tenantId);
 
     // Enviar a WhatsApp
+    const targetRecipient = (conversation.contact.customFields as any)?.jid || conversation.contact.phoneNumber;
     const sendRes = await gateway.sendMessage({
-      recipient: conversation.contact.phoneNumber,
+      recipient: targetRecipient,
       text,
     });
 
