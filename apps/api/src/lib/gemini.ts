@@ -85,4 +85,4 @@ Extrae la información en el siguiente esquema JSON estricto:
   }
 }
 
-export default genAI;
+export default getGenAI;

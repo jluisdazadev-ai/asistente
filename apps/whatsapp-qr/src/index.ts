@@ -103,7 +103,6 @@ async function startBaileysSession(tenantId: string, sessionId: string, forceRes
     const sock = makeWASocket({
       version,
       logger: pino({ level: 'silent' }),
-      printQRInTerminal: true,
       auth: state,
       browser: typeof Browsers !== 'undefined' ? Browsers.macOS('Desktop') : ['Mac OS', 'Desktop', '14.4.1'],
       syncFullHistory: false,
@@ -338,11 +337,15 @@ async function autoRestoreSavedSessions() {
   }
 }
 
-app.listen({ port: PORT, host: '0.0.0.0' }, async (err, address) => {
-  if (err) {
+async function startQrService() {
+  try {
+    const address = await app.listen({ port: PORT, host: '0.0.0.0' });
+    console.log(`⚡ [Microservicio Baileys QR] Escuchando en ${address}`);
+    await autoRestoreSavedSessions();
+  } catch (err: any) {
     console.error('Error al arrancar microservicio Baileys:', err);
     process.exit(1);
   }
-  console.log(`⚡ [Microservicio Baileys QR] Escuchando en ${address}`);
-  await autoRestoreSavedSessions();
-});
+}
+
+startQrService();
