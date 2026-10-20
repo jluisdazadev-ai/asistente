@@ -20,7 +20,7 @@ export const config = {
   // Gemini AI
   gemini: {
     apiKey: (process.env.GEMINI_API_KEY || '').replace(/["']/g, '').trim(),
-    model: (process.env.GEMINI_MODEL || 'gemini-3.8-flash').replace(/["']/g, '').trim(),
+    model: (process.env.GEMINI_MODEL || 'gemini-flash-lite-latest').replace(/["']/g, '').trim(),
     embeddingModel: (process.env.GEMINI_EMBEDDING_MODEL || 'gemini-embedding-2').replace(/["']/g, '').trim(),
   },
 

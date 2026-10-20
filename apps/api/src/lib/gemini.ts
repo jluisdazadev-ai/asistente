@@ -17,11 +17,11 @@ export function getGeminiModel(options?: {
   modelOverride?: string;
 }) {
   const genAI = getGenAI();
-  let modelName = options?.modelOverride || (process.env.GEMINI_MODEL || config.gemini.model || 'gemini-3.8-flash').replace(/["']/g, '').trim();
+  let modelName = options?.modelOverride || (process.env.GEMINI_MODEL || config.gemini.model || 'gemini-flash-lite-latest').replace(/["']/g, '').trim();
 
-  // Compatibilidad automática con cuentas recientes (Google deprecó 1.5 y 2.5 para nuevas cuentas)
-  if (modelName === 'gemini-1.5-flash' || modelName === 'gemini-2.5-flash' || modelName === 'gemini-1.5-pro') {
-    modelName = 'gemini-3.8-flash';
+  // Compatibilidad automática con cuentas recientes (Google deprecó 1.5/2.5 y 3.8-flash sufre sobrecarga 503)
+  if (modelName === 'gemini-1.5-flash' || modelName === 'gemini-2.5-flash' || modelName === 'gemini-1.5-pro' || modelName === 'gemini-3.8-flash') {
+    modelName = 'gemini-flash-lite-latest';
   }
 
   return genAI.getGenerativeModel(
@@ -60,9 +60,9 @@ export async function generateEmbedding(text: string): Promise<number[]> {
  * Analiza un comprobante bancario o imagen con Gemini Vision
  */
 export async function analyzeReceiptImage(imageBase64: string, mimeType: string = 'image/jpeg') {
-  let modelName = (process.env.GEMINI_MODEL || config.gemini.model || 'gemini-3.8-flash').replace(/["']/g, '').trim();
-  if (modelName === 'gemini-1.5-flash' || modelName === 'gemini-2.5-flash') {
-    modelName = 'gemini-3.8-flash';
+  let modelName = (process.env.GEMINI_MODEL || config.gemini.model || 'gemini-flash-lite-latest').replace(/["']/g, '').trim();
+  if (modelName === 'gemini-1.5-flash' || modelName === 'gemini-2.5-flash' || modelName === 'gemini-3.8-flash') {
+    modelName = 'gemini-flash-lite-latest';
   }
 
   const model = getGenAI().getGenerativeModel(

@@ -1,7 +1,5 @@
 import { prisma, ConversationStatus, MessageFormat, MessageDirection, MessageSender } from '@crm/database';
 import { getGeminiModel } from '../lib/gemini';
-import { aiFunctionDeclarations } from './tools/definitions';
-import { executeToolCall } from './tools/executor';
 
 export interface ProcessInboundPromptOptions {
   tenantId: string;
@@ -59,7 +57,33 @@ export async function processConversationWithAI(options: ProcessInboundPromptOpt
     }
   }
 
-  // 3. Construir System Instruction dinámico
+  // 3. Consultar productos, cuentas y zonas para inyectar en el contexto de Gemini
+  const [products, bankAccounts, deliveryZones] = await Promise.all([
+    prisma.product.findMany({
+      where: { tenantId, isStockActive: true },
+      take: 20,
+    }),
+    prisma.bankAccount.findMany({
+      where: { tenantId, isActive: true },
+    }),
+    prisma.deliveryZone.findMany({
+      where: { tenantId },
+    }),
+  ]);
+
+  const catalogSnippet = products.length > 0
+    ? products.map((p) => `• ${p.name} ($${p.price.toLocaleString('es-CO')}): ${p.description}`).join('\n')
+    : 'Menú disponible consultando directamente con un asesor.';
+
+  const bankSnippet = bankAccounts.length > 0
+    ? bankAccounts.map((b) => `• ${b.bankName} (${b.accountType}): ${b.accountNumber} - Titular: ${b.holderName}`).join('\n')
+    : 'Cuentas para transferencia: Nequi / Bancolombia.';
+
+  const zonesSnippet = deliveryZones.length > 0
+    ? deliveryZones.map((z) => `• ${z.zoneName}: $${z.price.toLocaleString('es-CO')} (aprox. ${z.estimatedMinutes} min)`).join('\n')
+    : 'Cobertura en toda la ciudad.';
+
+  // 4. Construir System Instruction dinámico enriquecido
   const toneMap: Record<string, string> = {
     FRIENDLY: 'Cálido, amable, servicial y empático. Usa emojis moderados.',
     FORMAL: 'Corporativo, respetuoso, pulcro y sumamente profesional.',
@@ -78,31 +102,35 @@ ${toneMap[botConfig.tone] || toneMap.FRIENDLY}
 REGLAS DE NEGOCIO ESTRICTAS:
 ${botConfig.businessRules || 'Atiende amablemente y brinda información veraz.'}
 
+CATÁLOGO OFICIAL Y PRECIOS:
+${catalogSnippet}
+
+ZONAS DE DOMICILIO:
+${zonesSnippet}
+
+CUENTAS PARA PAGO / TRANSFERENCIA:
+${bankSnippet}
+
 DIRECTIVAS OPERATIVAS:
-1. Responde de forma concisa y amigable, con un formato limpio ideal para WhatsApp (párrafos cortos, viñetas si listas productos).
-2. Usa la herramienta 'check_catalog_and_stock' para consultar productos, precios y disponibilidad en lugar de inventar datos.
-3. Si el cliente pide productos o un pedido, utiliza 'create_or_update_order' para calcular el monto exacto con domicilio y darle el total.
-4. Cuando el cliente pida cómo pagar o envíe el pedido, usa 'get_payment_information' para suministrar las cuentas de transferencia (Nequi, Bancolombia, etc.).
-5. Si el cliente envía un comprobante de pago o transferencia, utiliza 'verify_payment_receipt' para confirmarlo. Si es verificado, felicítalo y confirma el pedido.
-6. Actualiza las etapas del CRM usando 'update_crm_stage' a medida que la conversación avanza (ej. 'IN_QUERY' al preguntar el menú, 'AWAITING_PAYMENT' al enviar las cuentas, 'CONFIRMED' tras pagar).
-7. Si el cliente solicita explícitamente hablar con un humano o se presenta una queja/problema, transfiere de inmediato con 'handoff_to_human_agent'.
-8. Si el cliente envía una consulta detallada sobre manuales o políticas complejas, consulta 'search_knowledge_base'.
+1. Responde de forma concisa, cálida y amigable, con un formato limpio ideal para WhatsApp (párrafos cortos, viñetas para listar opciones).
+2. Si preguntan si hay servicio o saludan, confirma con entusiasmo el servicio activo y menciona las hamburguesas más pedidas con sus precios reales.
+3. Si el cliente pide productos o un pedido, suma los productos más el domicilio según su zona y dale el total claro.
+4. Si pide cómo pagar o confirma el pedido, suministra las cuentas de transferencia (Nequi, Bancolombia).
+5. Si el cliente pide hablar con un humano o asesor, indícale amablemente que un asesor se comunicará en breve y agrega al final de tu mensaje la etiqueta [ACCION: HUMANO].
+6. A medida que avance el pedido, puedes agregar discretamente al final de tu mensaje una etiqueta para el embudo: [ETAPA: IN_QUERY], [ETAPA: AWAITING_PAYMENT], o [ETAPA: CONFIRMED].
 
 ${botConfig.customSystemPrompt ? `INSTRUCCIONES ADICIONALES DEL DUEÑO:\n${botConfig.customSystemPrompt}` : ''}
 `.trim();
 
-  // 4. Cargar historial reciente de mensajes
+  // 5. Cargar historial reciente de mensajes
   const recentMessages = await prisma.message.findMany({
     where: { conversationId },
     orderBy: { createdAt: 'desc' },
-    take: 12,
+    take: 10,
   });
   recentMessages.reverse();
 
-  // Mapear historial al formato de Gemini garantizando alternancia estricta (user -> model)
   const sanitizedHistory: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
-
-  // Excluimos el último mensaje ya que se envía como prompt activo en chat.sendMessage
   const historyPool = recentMessages.slice(0, -1);
 
   for (const msg of historyPool) {
@@ -110,7 +138,7 @@ ${botConfig.customSystemPrompt ? `INSTRUCCIONES ADICIONALES DEL DUEÑO:\n${botCo
     const role: 'user' | 'model' = msg.sender === MessageSender.CUSTOMER ? 'user' : 'model';
 
     if (sanitizedHistory.length === 0) {
-      if (role !== 'user') continue; // El primer turno en Gemini debe ser 'user'
+      if (role !== 'user') continue;
       sanitizedHistory.push({ role: 'user', parts: [{ text: msg.body }] });
       continue;
     }
@@ -123,95 +151,69 @@ ${botConfig.customSystemPrompt ? `INSTRUCCIONES ADICIONALES DEL DUEÑO:\n${botCo
     }
   }
 
-  // Si el historial termina en 'user', retirarlo para que no haya dos 'user' seguidos con sendMessage
   if (sanitizedHistory.length > 0 && sanitizedHistory[sanitizedHistory.length - 1].role === 'user') {
     sanitizedHistory.pop();
   }
 
-  // 5. Inicializar modelo de Gemini con Function Calling
+  // 6. Ejecución del modelo Gemini
   try {
     const model = getGeminiModel({
       systemInstruction,
       temperature: Number(botConfig.temperature),
-      tools: [{ functionDeclarations: aiFunctionDeclarations }],
     });
 
     const chat = model.startChat({
       history: sanitizedHistory,
     });
 
+    console.log(`🤖 [Gemini IA] Generando respuesta para conv ${conversationId} con mensaje: "${unifiedPromptText}"`);
     let result = await chat.sendMessage(unifiedPromptText);
-    let response = result.response;
+    let replyText = result.response.text();
 
-    // Helper seguro para obtener functionCalls
-    const extractCalls = (res: any) => {
-      if (typeof res.functionCalls === 'function') return res.functionCalls() || [];
-      return res.functionCalls || [];
-    };
+    // Procesar etiquetas de control CRM
+    if (replyText.includes('[ACCION: HUMANO]')) {
+      await prisma.conversation.update({
+        where: { id: conversationId },
+        data: { status: ConversationStatus.HUMAN_AGENT },
+      });
+      replyText = replyText.replace('[ACCION: HUMANO]', '').trim();
+    }
 
-    let calls = extractCalls(response);
-    let maxLoops = 5;
-
-    while (calls.length > 0 && maxLoops > 0) {
-      maxLoops--;
-      console.log(`🤖 [Gemini Function Call] Disparando ${calls.length} herramientas...`);
-      const functionResponses: any[] = [];
-
-      for (const call of calls) {
-        console.log(`🔧 [Tool Ejecutada] ${call.name} con parámetros:`, JSON.stringify(call.args));
-        const executionOutput = await executeToolCall(
-          tenantId,
-          conversationId,
-          contactId,
-          call.name,
-          call.args
-        );
-
-        functionResponses.push({
-          functionResponse: {
-            name: call.name,
-            response: executionOutput,
-          },
+    const stageMatch = replyText.match(/\[ETAPA:\s*([A-Z_]+)\]/);
+    if (stageMatch) {
+      const stageKey = stageMatch[1];
+      const targetStage = await prisma.crmStage.findFirst({
+        where: { pipeline: { tenantId }, stageKey },
+      });
+      if (targetStage) {
+        await prisma.conversation.update({
+          where: { id: conversationId },
+          data: { stageId: targetStage.id },
         });
       }
-
-      result = await chat.sendMessage(functionResponses);
-      response = result.response;
-      calls = extractCalls(response);
+      replyText = replyText.replace(stageMatch[0], '').trim();
     }
 
-    let replyText = '';
-    try {
-      replyText = response.text();
-    } catch {
-      const candidate = response.candidates?.[0];
-      const textParts = candidate?.content?.parts?.filter((p: any) => p.text)?.map((p: any) => p.text);
-      replyText = textParts?.join('\n') || '';
-    }
-
+    console.log(`✅ [Gemini IA Respuesta Lista]: "${replyText.substring(0, 60)}..."`);
     return replyText;
   } catch (err: any) {
-    console.error('⚠️ [Error Gemini con Tools]:', err.message || err);
+    console.error('⚠️ [Error Gemini]:', err.message || err);
 
-    // Fallback conversacional sin herramientas
+    // Fallback conversacional directo
     try {
-      console.log('🔄 [Gemini Fallback] Intentando generar respuesta conversacional directa sin herramientas...');
+      console.log('🔄 [Gemini Fallback Directo] Intentando llamada generateContent directa...');
       const fallbackModel = getGeminiModel({
         systemInstruction,
         temperature: Number(botConfig.temperature),
       });
 
-      const fallbackChat = fallbackModel.startChat({
-        history: sanitizedHistory,
-      });
-
-      const fallbackResult = await fallbackChat.sendMessage(unifiedPromptText);
+      const fallbackResult = await fallbackModel.generateContent(unifiedPromptText);
       const reply = fallbackResult.response.text();
-      console.log(`✅ [Gemini Fallback Exitoso]: "${reply.substring(0, 50)}..."`);
+      console.log(`✅ [Gemini Fallback Exitoso]: "${reply.substring(0, 60)}..."`);
       return reply;
     } catch (fallbackErr: any) {
-      console.error('❌ [Error Gemini Fallback Crítico]:', fallbackErr.message || fallbackErr);
-      return '¡Hola! He recibido tu mensaje pero tuve un pequeño inconveniente procesándolo. En un momento un asesor te atenderá.';
+      console.error('❌ [Error Crítico]:', fallbackErr.message || fallbackErr);
+      return '¡Hola! He recibido tu mensaje. En un momento un asesor te atenderá con todo gusto.';
     }
   }
 }
