@@ -11,7 +11,6 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   WASocket,
-  proto,
 } from '@whiskeysockets/baileys';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
@@ -23,6 +22,9 @@ const SERVICE_SECRET = process.env.QR_WEBHOOK_SECRET || 'baileys_internal_secret
 
 // Mapa de sockets activos por sessionId
 const activeSessions = new Map<string, WASocket>();
+// Mapa en memoria del último código QR base64 generado
+const latestQrMap = new Map<string, string>();
+const sessionStatusMap = new Map<string, string>();
 
 const app = Fastify({
   logger: false,
@@ -49,110 +51,166 @@ async function dispatchWebhookToApi(tenantId: string, event: string, data: any) 
   }
 }
 
-// Inicializa o reanuda una sesión de WhatsApp
-async function startBaileysSession(tenantId: string, sessionId: string) {
+// Inicializa o renueva una sesión de WhatsApp
+async function startBaileysSession(tenantId: string, sessionId: string, forceReset = true): Promise<{ status: string; qrCodeBase64?: string }> {
+  // Si ya existía una sesión en memoria, cerrarla para renovar
   if (activeSessions.has(sessionId)) {
-    console.log(`Sesión ${sessionId} ya se encuentra activa.`);
-    return activeSessions.get(sessionId)!;
+    try {
+      const oldSock = activeSessions.get(sessionId);
+      oldSock?.end(undefined);
+    } catch {}
+    activeSessions.delete(sessionId);
   }
 
   const authDir = path.join(process.cwd(), 'baileys_auth_info', sessionId);
+  if (forceReset && fs.existsSync(authDir)) {
+    try {
+      fs.rmSync(authDir, { recursive: true, force: true });
+    } catch {}
+  }
   if (!fs.existsSync(authDir)) {
     fs.mkdirSync(authDir, { recursive: true });
   }
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  const { version } = await fetchLatestBaileysVersion();
 
-  const sock = makeWASocket({
-    version,
-    logger: pino({ level: 'silent' }),
-    printQRInTerminal: true,
-    auth: state,
-    browser: ['Ubuntu', 'Chrome', '20.0.04'],
-    syncFullHistory: false,
-  });
+  let version;
+  try {
+    const v = await fetchLatestBaileysVersion();
+    version = v.version;
+  } catch {
+    version = [2, 3000, 1015901307] as any;
+  }
 
-  activeSessions.set(sessionId, sock);
+  sessionStatusMap.set(sessionId, 'STARTING');
 
-  // Escuchar actualización de credenciales
-  sock.ev.on('creds.update', saveCreds);
+  return new Promise((resolve) => {
+    let hasResolved = false;
 
-  // Escuchar estado de conexión y generación de QR
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    const sock = makeWASocket({
+      version,
+      logger: pino({ level: 'silent' }),
+      printQRInTerminal: true,
+      auth: state,
+      browser: ['Ubuntu', 'Chrome', '20.0.04'],
+      syncFullHistory: false,
+    });
 
-    if (qr) {
-      console.log(`📱 [QR Generado] Nuevo código QR para sesión ${sessionId}`);
-      const qrCodeBase64 = await qrcode.toDataURL(qr);
-      await dispatchWebhookToApi(tenantId, 'connection.update', {
-        status: 'SCAN_QR',
-        qrCodeBase64,
-      });
-    }
+    activeSessions.set(sessionId, sock);
 
-    if (connection === 'open') {
-      const phoneNumber = sock.user?.id?.split(':')[0] || '';
-      console.log(`✅ [WhatsApp Conectado] Sesión ${sessionId} vinculada al número: +${phoneNumber}`);
-      await dispatchWebhookToApi(tenantId, 'connection.update', {
-        status: 'CONNECTED',
-        phoneNumber,
-      });
-    } else if (connection === 'close') {
-      const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.log(`🔌 [WhatsApp Desconectado] Sesión ${sessionId}. Código: ${statusCode}. Reconectar: ${shouldReconnect}`);
+    sock.ev.on('creds.update', saveCreds);
 
-      activeSessions.delete(sessionId);
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
 
-      await dispatchWebhookToApi(tenantId, 'connection.update', {
-        status: 'DISCONNECTED',
-      });
+      if (qr) {
+        console.log(`📱 [QR Generado] Código QR emitido para sesión ${sessionId}`);
+        const qrCodeBase64 = await qrcode.toDataURL(qr);
+        latestQrMap.set(sessionId, qrCodeBase64);
+        sessionStatusMap.set(sessionId, 'SCAN_QR');
 
-      if (shouldReconnect) {
-        console.log(`Reintentando reconexión automática en 3s para ${sessionId}...`);
-        setTimeout(() => startBaileysSession(tenantId, sessionId), 3000);
+        await dispatchWebhookToApi(tenantId, 'connection.update', {
+          status: 'SCAN_QR',
+          qrCodeBase64,
+        });
+
+        if (!hasResolved) {
+          hasResolved = true;
+          resolve({ status: 'SCAN_QR', qrCodeBase64 });
+        }
       }
-    }
+
+      if (connection === 'open') {
+        const phoneNumber = sock.user?.id?.split(':')[0] || '';
+        console.log(`✅ [WhatsApp Conectado] Sesión ${sessionId} vinculada al número: +${phoneNumber}`);
+        latestQrMap.delete(sessionId);
+        sessionStatusMap.set(sessionId, 'CONNECTED');
+
+        await dispatchWebhookToApi(tenantId, 'connection.update', {
+          status: 'CONNECTED',
+          phoneNumber,
+        });
+
+        if (!hasResolved) {
+          hasResolved = true;
+          resolve({ status: 'CONNECTED' });
+        }
+      } else if (connection === 'close') {
+        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        console.log(`🔌 [WhatsApp Desconectado] Sesión ${sessionId}. Código: ${statusCode}.`);
+
+        activeSessions.delete(sessionId);
+        sessionStatusMap.set(sessionId, 'DISCONNECTED');
+
+        await dispatchWebhookToApi(tenantId, 'connection.update', {
+          status: 'DISCONNECTED',
+        });
+      }
+    });
+
+    sock.ev.on('messages.upsert', async (m) => {
+      if (m.type !== 'notify') return;
+      for (const msg of m.messages) {
+        if (msg.key.fromMe) continue;
+        await dispatchWebhookToApi(tenantId, 'messages.upsert', {
+          message: msg,
+        });
+      }
+    });
+
+    // Timeout de 7s por si Baileys tarda en emitir el primer socket update
+    setTimeout(() => {
+      if (!hasResolved) {
+        hasResolved = true;
+        const existingQr = latestQrMap.get(sessionId);
+        resolve({
+          status: existingQr ? 'SCAN_QR' : 'STARTING',
+          qrCodeBase64: existingQr,
+        });
+      }
+    }, 7000);
   });
-
-  // Escuchar mensajes entrantes
-  sock.ev.on('messages.upsert', async (m) => {
-    if (m.type !== 'notify') return;
-
-    for (const msg of m.messages) {
-      if (msg.key.fromMe) continue;
-
-      let mediaBase64: string | undefined = undefined;
-
-      // Si es audio o imagen, intentar procesar
-      await dispatchWebhookToApi(tenantId, 'messages.upsert', {
-        message: msg,
-        mediaBase64,
-      });
-    }
-  });
-
-  return sock;
 }
 
 // ========================================================
 // ENDPOINTS DEL MICROSERVICIO
 // ========================================================
 
-// 1. Iniciar sesión / Generar QR
+// 1. Iniciar sesión / Generar QR (espera y devuelve el QR si se genera rápido)
 app.post('/sessions/init', async (request, reply) => {
   const secret = request.headers['x-service-secret'];
   if (secret !== SERVICE_SECRET) return reply.status(401).send({ error: 'Unauthorized' });
 
-  const { tenantId, sessionId } = request.body as any;
+  const { tenantId, sessionId, forceReset } = request.body as any;
   if (!tenantId || !sessionId) return reply.status(400).send({ error: 'tenantId y sessionId requeridos' });
 
-  await startBaileysSession(tenantId, sessionId);
-  return reply.send({ success: true, status: 'STARTING' });
+  console.log(`⚡ [Init Baileys] Solicitud de generación de QR para tenant ${tenantId}...`);
+  const result = await startBaileysSession(tenantId, sessionId, forceReset ?? true);
+
+  return reply.send({
+    success: true,
+    status: result.status,
+    qrCodeBase64: result.qrCodeBase64 || latestQrMap.get(sessionId),
+  });
 });
 
-// 2. Enviar mensaje de texto
+// 2. Consultar QR y estado actual
+app.get('/sessions/:sessionId/qr', async (request, reply) => {
+  const secret = request.headers['x-service-secret'];
+  if (secret !== SERVICE_SECRET) return reply.status(401).send({ error: 'Unauthorized' });
+
+  const { sessionId } = request.params as any;
+  const qrCodeBase64 = latestQrMap.get(sessionId);
+  const status = sessionStatusMap.get(sessionId) || (activeSessions.has(sessionId) ? 'SCAN_QR' : 'DISCONNECTED');
+
+  return reply.send({
+    status,
+    qrCodeBase64,
+  });
+});
+
+// 3. Enviar mensaje de texto
 app.post('/sessions/:sessionId/messages/text', async (request, reply) => {
   const secret = request.headers['x-service-secret'];
   if (secret !== SERVICE_SECRET) return reply.status(401).send({ error: 'Unauthorized' });
@@ -171,7 +229,7 @@ app.post('/sessions/:sessionId/messages/text', async (request, reply) => {
   return reply.send({ success: true, messageId: sent?.key.id });
 });
 
-// 3. Enviar presencia (composing / paused)
+// 4. Enviar presencia (composing / paused)
 app.post('/sessions/:sessionId/presence', async (request, reply) => {
   const secret = request.headers['x-service-secret'];
   if (secret !== SERVICE_SECRET) return reply.status(401).send({ error: 'Unauthorized' });
@@ -188,7 +246,7 @@ app.post('/sessions/:sessionId/presence', async (request, reply) => {
   return reply.send({ success: true });
 });
 
-// 4. Enviar archivo multimedia
+// 5. Enviar archivo multimedia
 app.post('/sessions/:sessionId/messages/media', async (request, reply) => {
   const secret = request.headers['x-service-secret'];
   if (secret !== SERVICE_SECRET) return reply.status(401).send({ error: 'Unauthorized' });
@@ -213,7 +271,6 @@ app.post('/sessions/:sessionId/messages/media', async (request, reply) => {
   return reply.send({ success: true, messageId: sent?.key.id });
 });
 
-// Iniciar servidor
 app.listen({ port: PORT, host: '0.0.0.0' }, (err, address) => {
   if (err) {
     console.error('Error al arrancar microservicio Baileys:', err);

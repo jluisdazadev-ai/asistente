@@ -83,12 +83,28 @@ export default function ConnectionPage() {
     };
   }, []);
 
+  // Polling automático mientras el estado sea STARTING
+  useEffect(() => {
+    let interval: any;
+    if (qrStatus === 'STARTING') {
+      interval = setInterval(() => {
+        loadConnections();
+      }, 2000);
+    }
+    return () => clearInterval(interval);
+  }, [qrStatus]);
+
   const handleGenerateQR = async () => {
     setGeneratingQr(true);
+    setQrStatus('STARTING');
     try {
       const res = await fetchWithAuth('/connections/qr/init', { method: 'POST' });
       const data = await res.json();
       setQrStatus(data.status || 'STARTING');
+      if (data.qrCodeBase64) {
+        setQrCodeBase64(data.qrCodeBase64);
+        setQrStatus('SCAN_QR');
+      }
     } catch (err) {
       console.error('Error generando QR:', err);
     } finally {

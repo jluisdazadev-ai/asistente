@@ -4,7 +4,11 @@ let socket: Socket | null = null;
 
 export function getSocket(tenantId?: string): Socket {
   if (!socket) {
-    socket = io('http://localhost:4000', {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+    const protocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+    const socketUrl = `${protocol}//${host}:4000`;
+
+    socket = io(socketUrl, {
       transports: ['websocket', 'polling'],
     });
 
