@@ -58,7 +58,9 @@ export async function processConversationWithAI(options: ProcessInboundPromptOpt
   }
 
   // 3. Consultar productos, cuentas y zonas para inyectar en el contexto de Gemini
-  const [products, bankAccounts, deliveryZones] = await Promise.all([
+  const isSaasSales = conversation.tenant.slug === 'plataforma-saas';
+
+  const [products, bankAccounts, deliveryZones, activePlans] = await Promise.all([
     prisma.product.findMany({
       where: { tenantId, isStockActive: true },
       take: 20,
@@ -69,9 +71,23 @@ export async function processConversationWithAI(options: ProcessInboundPromptOpt
     prisma.deliveryZone.findMany({
       where: { tenantId },
     }),
+    isSaasSales
+      ? prisma.plan.findMany({ where: { isActive: true }, orderBy: { priceCents: 'asc' } })
+      : Promise.resolve([]),
   ]);
 
-  const catalogSnippet = products.length > 0
+  const plansSnippet = activePlans.length > 0
+    ? activePlans
+        .map(
+          (p) =>
+            `• ${p.name}: $${(p.priceCents / 100).toFixed(0)} ${p.currency}/mes\n  - Límite de conversaciones: ${p.maxConversationsPerMonth.toLocaleString()} mensajes/mes\n  - Usuarios simultáneos: ${p.maxTeamMembers} agentes\n  - Características: ${p.allowQrGateway ? 'Conexión QR' : ''} ${p.allowOfficialGateway ? '+ Meta API Oficial' : ''} ${p.allowVisionOcr ? '+ Validación de comprobantes con IA' : ''} ${p.allowVoiceNotes ? '+ Notas de voz' : ''}`
+        )
+        .join('\n\n')
+    : '';
+
+  const catalogSnippet = isSaasSales
+    ? `PLANES Y SUSCRIPCIONES OFICIALES DISPONIBLES:\n${plansSnippet}`
+    : products.length > 0
     ? products.map((p) => `• ${p.name} ($${p.price.toLocaleString('es-CO')}): ${p.description}`).join('\n')
     : 'Menú disponible consultando directamente con un asesor.';
 
@@ -92,6 +108,20 @@ export async function processConversationWithAI(options: ProcessInboundPromptOpt
     CONCILIATORY: 'Comprensivo, calmado y enfocado en resolver quejas cordialmente.',
   };
 
+  const saasDirectives = `
+DIRECTIVAS DE VENTA DEL SAAS (FACEBOOK ADS):
+1. Eres "Sofía", asesora comercial experta en la plataforma de CRM y Asistentes Virtuales de WhatsApp para negocios.
+2. Tu objetivo es cautivar a los prospectos que vienen de anuncios de Facebook/Instagram (*Click to WhatsApp*), resolver dudas y guiarlos a contratar uno de los planes.
+3. Explica los beneficios clave:
+   - Atención inmediata 24/7 sin perder clientes.
+   - Ahorro de más del 70% en personal de atención al cliente.
+   - Validación automática de comprobantes de pago por transferencia bancaria (Nequi, Bancolombia, etc.).
+   - Anti-baneo con simulación de comportamiento y escritura humana.
+   - Bandeja multi-agente para que varios operadores atiendan la misma línea.
+4. Cuando pregunten por precios o planes, cotiza con precisión los planes disponibles arriba.
+5. Invita a activar su negocio o solicitar datos para darles una demostración personalizada.
+`.trim();
+
   const systemInstruction = `
 Eres "${botConfig.botName}", el asistente virtual oficial de "${conversation.tenant.businessName}".
 Tu rol principal: ${botConfig.roleDescription}
@@ -102,14 +132,7 @@ ${toneMap[botConfig.tone] || toneMap.FRIENDLY}
 REGLAS DE NEGOCIO ESTRICTAS:
 ${botConfig.businessRules || 'Atiende amablemente y brinda información veraz.'}
 
-CATÁLOGO OFICIAL Y PRECIOS:
-${catalogSnippet}
-
-ZONAS DE DOMICILIO:
-${zonesSnippet}
-
-CUENTAS PARA PAGO / TRANSFERENCIA:
-${bankSnippet}
+${isSaasSales ? saasDirectives : `CATÁLOGO OFICIAL Y PRECIOS:\n${catalogSnippet}\n\nZONAS DE DOMICILIO:\n${zonesSnippet}\n\nCUENTAS PARA PAGO / TRANSFERENCIA:\n${bankSnippet}`}
 
 DIRECTIVAS OPERATIVAS:
 1. Responde de forma concisa, cálida y amigable, con un formato limpio ideal para WhatsApp (párrafos cortos, viñetas para listar opciones).

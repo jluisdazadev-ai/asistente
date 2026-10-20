@@ -12,6 +12,7 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   WASocket,
   Browsers,
+  downloadMediaMessage,
 } from '@whiskeysockets/baileys';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
@@ -202,10 +203,40 @@ async function startBaileysSession(tenantId: string, sessionId: string, forceRes
           resolvedPhone = altJid.split('@')[0];
         }
 
+        // Descargar contenido multimedia si es imagen o nota de voz
+        let mediaBase64: string | undefined;
+        let msgContent = msg.message;
+        if (msgContent?.ephemeralMessage?.message) msgContent = msgContent.ephemeralMessage.message;
+        if (msgContent?.viewOnceMessage?.message) msgContent = msgContent.viewOnceMessage.message;
+        if (msgContent?.viewOnceMessageV2?.message) msgContent = msgContent.viewOnceMessageV2.message;
+        if (msgContent?.documentWithCaptionMessage?.message) msgContent = msgContent.documentWithCaptionMessage.message;
+
+        if (msgContent?.imageMessage || msgContent?.audioMessage || msgContent?.documentMessage) {
+          try {
+            console.log(`📥 [Baileys Media] Descargando archivo multimedia recibido...`);
+            const buffer = await downloadMediaMessage(
+              msg,
+              'buffer',
+              {},
+              {
+                logger: pino({ level: 'silent' }),
+                reuploadRequest: sock.updateMediaMessage,
+              }
+            );
+            if (buffer && buffer.length > 0) {
+              mediaBase64 = (buffer as Buffer).toString('base64');
+              console.log(`📸 [Baileys Media] Multimedia descargado exitosamente (${buffer.length} bytes)`);
+            }
+          } catch (mediaErr: any) {
+            console.warn(`⚠️ [Baileys Media] No se pudo descargar el archivo multimedia:`, mediaErr.message);
+          }
+        }
+
         await dispatchWebhookToApi(tenantId, 'messages.upsert', {
           message: msg,
           remoteJid,
           resolvedPhone,
+          mediaBase64,
         });
       }
     });

@@ -14,6 +14,9 @@ import {
   FileText,
   Volume2,
   ShieldAlert,
+  UtensilsCrossed,
+  Bike,
+  Eye,
 } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/api';
 import { getSocket } from '@/lib/socket';
@@ -54,6 +57,8 @@ export default function LiveChatPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [search, setSearch] = useState('');
+  const [activeOrder, setActiveOrder] = useState<any>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -115,7 +120,23 @@ export default function LiveChatPage() {
     };
   }, [selectedConv]);
 
-  // Cargar mensajes al seleccionar una conversación
+  // Cargar orden activa para la conversación
+  const loadActiveOrder = async (convId: string) => {
+    try {
+      const res = await fetchWithAuth('/orders?limit=20');
+      const data = await res.json();
+      if (data.orders) {
+        const found = data.orders.find(
+          (o: any) => o.conversationId === convId && ['AWAITING_PAYMENT', 'PREPARING', 'SHIPPED'].includes(o.status)
+        );
+        setActiveOrder(found || null);
+      }
+    } catch (e) {
+      console.warn('Error cargando orden activa:', e);
+    }
+  };
+
+  // Cargar mensajes y orden al seleccionar una conversación
   useEffect(() => {
     if (!selectedConv) return;
     const loadMessages = async () => {
@@ -128,7 +149,43 @@ export default function LiveChatPage() {
       }
     };
     loadMessages();
+    loadActiveOrder(selectedConv.id);
   }, [selectedConv]);
+
+  // Acciones Rápidas sobre el Pedido
+  const handleApprovePayment = async (orderId: string) => {
+    try {
+      setActionLoading(true);
+      await fetchWithAuth(`/orders/${orderId}/approve-payment`, { method: 'POST' });
+      if (selectedConv) {
+        loadActiveOrder(selectedConv.id);
+        const res = await fetchWithAuth(`/crm/conversations/${selectedConv.id}/messages`);
+        const data = await res.json();
+        setMessages(data.messages || []);
+      }
+    } catch (err) {
+      console.error('Error aprobando pago:', err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDispatchOrder = async (orderId: string) => {
+    try {
+      setActionLoading(true);
+      await fetchWithAuth(`/orders/${orderId}/dispatch`, { method: 'POST' });
+      if (selectedConv) {
+        loadActiveOrder(selectedConv.id);
+        const res = await fetchWithAuth(`/crm/conversations/${selectedConv.id}/messages`);
+        const data = await res.json();
+        setMessages(data.messages || []);
+      }
+    } catch (err) {
+      console.error('Error despachando orden:', err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   // Scroll automático hacia el final del chat
   useEffect(() => {
@@ -327,6 +384,55 @@ export default function LiveChatPage() {
               </button>
             </div>
           </div>
+
+          {/* BANNER DE ACCIÓN RÁPIDA DE PEDIDOS */}
+          {activeOrder && (
+            <div className="px-5 py-2.5 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center space-x-2">
+                <span className={`flex h-2.5 w-2.5 rounded-full ${
+                  activeOrder.status === 'AWAITING_PAYMENT' ? 'bg-amber-500 animate-pulse' :
+                  activeOrder.status === 'PREPARING' ? 'bg-blue-600 animate-pulse' : 'bg-emerald-500'
+                }`} />
+                <span className="font-extrabold text-xs text-slate-900">
+                  Orden #{activeOrder.shortCode || activeOrder.id.slice(-6).toUpperCase()}
+                </span>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  activeOrder.status === 'AWAITING_PAYMENT' ? 'bg-amber-100 text-amber-800' :
+                  activeOrder.status === 'PREPARING' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {activeOrder.status === 'AWAITING_PAYMENT' ? '💰 Comprobante por Validar' :
+                   activeOrder.status === 'PREPARING' ? '🍳 En Cocina (Preparación)' : '🛵 En Camino'}
+                </span>
+                <span className="text-xs font-bold text-slate-700">
+                  (${Number(activeOrder.total).toLocaleString('es-CO')} COP)
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                {activeOrder.status === 'AWAITING_PAYMENT' && (
+                  <button
+                    disabled={actionLoading}
+                    onClick={() => handleApprovePayment(activeOrder.id)}
+                    className="flex items-center space-x-1.5 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span>{actionLoading ? 'Aprobando...' : 'Aprobar Pago y Pasar a Cocina'}</span>
+                  </button>
+                )}
+
+                {activeOrder.status === 'PREPARING' && (
+                  <button
+                    disabled={actionLoading}
+                    onClick={() => handleDispatchOrder(activeOrder.id)}
+                    className="flex items-center space-x-1.5 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-50"
+                  >
+                    <Bike className="h-3.5 w-3.5" />
+                    <span>{actionLoading ? 'Despachando...' : 'Marcar Despachado (Avisar en Camino)'}</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Área de Mensajes */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 bg-[#efeae2] bg-opacity-95">

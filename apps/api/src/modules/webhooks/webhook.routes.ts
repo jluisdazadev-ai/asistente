@@ -156,6 +156,54 @@ export const webhookRoutes: FastifyPluginAsync = async (fastify: FastifyInstance
 
         console.log(`📩 [WhatsApp Inbound] Mensaje recibido de ${remoteJid} (tel: +${senderPhone}) [${format}]: "${text || '[multimedia]'}"`);
 
+        // Interceptor de Comandos Operativos de WhatsApp (OK, LISTO, RECHAZAR)
+        const cleanText = (text || '').trim().toUpperCase();
+        const okMatch = cleanText.match(/^(?:OK|APROBADO)\s+([A-Z0-9]{4,8})/);
+        const listoMatch = cleanText.match(/^(?:LISTO|DESPACHADO)\s+([A-Z0-9]{4,8})/);
+        const rechazarMatch = cleanText.match(/^RECHAZAR\s+([A-Z0-9]{4,8})/);
+
+        if (okMatch || listoMatch || rechazarMatch) {
+          const targetCode = (okMatch || listoMatch || rechazarMatch)![1];
+          const matchedOrder = await prisma.order.findFirst({
+            where: {
+              tenantId,
+              OR: [
+                { shortCode: { equals: targetCode, mode: 'insensitive' } },
+                { id: { endsWith: targetCode.toLowerCase() } },
+              ],
+            },
+          });
+
+          if (matchedOrder) {
+            const { confirmOrderPayment, dispatchOrderShipping, rejectOrderPayment } = await import('../orders/order-dispatch.service');
+            const { getGatewayForTenant } = await import('../gateways/gateway.factory');
+            const gateway = await getGatewayForTenant(tenantId);
+
+            if (okMatch) {
+              await confirmOrderPayment(tenantId, matchedOrder.id);
+              await gateway.sendMessage({
+                recipient: remoteJid,
+                text: `✅ ¡Orden #${targetCode} aprobada exitosamente! Se notificó al cliente y se pasó a cocina.`,
+              });
+              return;
+            } else if (listoMatch) {
+              await dispatchOrderShipping(tenantId, matchedOrder.id);
+              await gateway.sendMessage({
+                recipient: remoteJid,
+                text: `🛵 ¡Orden #${targetCode} despachada! Se notificó al cliente que va en camino.`,
+              });
+              return;
+            } else if (rechazarMatch) {
+              await rejectOrderPayment(tenantId, matchedOrder.id, 'Rechazado por comando administrativo');
+              await gateway.sendMessage({
+                recipient: remoteJid,
+                text: `❌ Comprobante de orden #${targetCode} rechazado. Chat pasado a asesor humano.`,
+              });
+              return;
+            }
+          }
+        }
+
         await handleInboundMessage({
           tenantId,
           senderPhone,

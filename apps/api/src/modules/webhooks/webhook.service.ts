@@ -122,9 +122,73 @@ export async function handleInboundMessage(payload: InboundMessagePayload) {
     visionAnalysisData = await analyzeReceiptImage(base64, mediaMimeType || 'image/jpeg');
 
     if (visionAnalysisData.is_valid_receipt) {
-      textSnippetForAI = `[COMPROBANTE DE PAGO DETECTADO: Banco: ${visionAnalysisData.bank_name}, Monto: $${visionAnalysisData.amount}, Referencia: ${visionAnalysisData.reference_code}, Fecha: ${visionAnalysisData.date_time}]`;
+      textSnippetForAI = `[COMPROBANTE DE PAGO DETECTADO: Banco: ${visionAnalysisData.bank_name}, Monto: $${visionAnalysisData.amount}, Referencia: ${visionAnalysisData.reference_code}, Fecha: ${visionAnalysisData.date_time}]. IMPORTANTE: Confirma al cliente que el comprobante fue recibido con éxito y que nuestro equipo está verificando la transferencia en el sistema para pasar su pedido a preparación.`;
+
+      try {
+        let activeOrder = await prisma.order.findFirst({
+          where: {
+            tenantId,
+            conversationId: conversation.id,
+            status: { in: ['DRAFT', 'AWAITING_PAYMENT'] },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (!activeOrder) {
+          const shortCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+          activeOrder = await prisma.order.create({
+            data: {
+              tenantId,
+              conversationId: conversation.id,
+              contactId: contact.id,
+              status: 'AWAITING_PAYMENT',
+              shortCode,
+              total: visionAnalysisData.amount || 0,
+              subtotal: visionAnalysisData.amount || 0,
+              paymentMethod: visionAnalysisData.bank_name || 'TRANSFERENCIA',
+              paymentReference: visionAnalysisData.reference_code || null,
+              paymentReceiptUrl: uploadedMediaUrl,
+              extractedReceiptData: visionAnalysisData,
+            },
+          });
+        } else {
+          await prisma.order.update({
+            where: { id: activeOrder.id },
+            data: {
+              status: 'AWAITING_PAYMENT',
+              paymentMethod: visionAnalysisData.bank_name || activeOrder.paymentMethod || 'TRANSFERENCIA',
+              paymentReference: visionAnalysisData.reference_code || activeOrder.paymentReference,
+              paymentReceiptUrl: uploadedMediaUrl || activeOrder.paymentReceiptUrl,
+              extractedReceiptData: visionAnalysisData,
+            },
+          });
+        }
+
+        // Si tiene configurado grupo de finanzas en WhatsApp, enviar alerta
+        const botConfig = conversation.tenant?.botConfig;
+        const financeTarget = botConfig?.financeGroupId || botConfig?.financeNotificationPhone;
+        if (financeTarget && (botConfig?.notifyFinanceGroup || botConfig?.financeNotificationPhone)) {
+          const { getGatewayForTenant } = await import('../gateways/gateway.factory');
+          const gateway = await getGatewayForTenant(tenantId);
+          const sCode = activeOrder.shortCode || activeOrder.id.slice(-6).toUpperCase();
+          const financeMsg = `💰 *NUEVO COMPROBANTE RECIBIDO* 💰\n━━━━━━━━━━━━━━━━━━━━\n📦 *Orden:* #${sCode}\n👤 *Cliente:* ${contact.name || contact.phoneNumber}\n🏦 *Banco:* ${visionAnalysisData.bank_name}\n💵 *Monto:* $${Number(visionAnalysisData.amount).toLocaleString('es-CO')} COP\n🔢 *Ref:* ${visionAnalysisData.reference_code}\n━━━━━━━━━━━━━━━━━━━━\n👉 Confirma desde la plataforma o responde *OK ${sCode}*`;
+
+          if (uploadedMediaUrl) {
+            await gateway.sendMedia({
+              recipient: financeTarget,
+              mediaUrl: uploadedMediaUrl,
+              mimeType: mediaMimeType || 'image/jpeg',
+              caption: financeMsg,
+            });
+          } else {
+            await gateway.sendMessage({ recipient: financeTarget, text: financeMsg });
+          }
+        }
+      } catch (err: any) {
+        console.warn(`⚠️ Error asociando comprobante a orden:`, err.message);
+      }
     } else {
-      textSnippetForAI = `[IMAGEN ENVIADA: Foto de producto o consulta visual enviada por el cliente.]`;
+      textSnippetForAI = `[IMAGEN ENVIADA: Foto enviada por el cliente.]`;
     }
   } else if (format === 'AUDIO') {
     textSnippetForAI = `[NOTA DE VOZ ENVIADA: Cliente envía mensaje de audio solicitando información o atención.]`;
@@ -152,7 +216,7 @@ export async function handleInboundMessage(payload: InboundMessagePayload) {
 
   // 6. Enviar al Debounce Buffer para la IA (si la conversación está en BOT_ACTIVE)
   if (conversation.status === 'BOT_ACTIVE') {
-    const debounceSeconds = conversation.tenant.botConfig?.debounceSeconds || 6;
+    const debounceSeconds = conversation.tenant.botConfig?.debounceSeconds || 2;
 
     await addMessageToDebounceBuffer({
       tenantId,

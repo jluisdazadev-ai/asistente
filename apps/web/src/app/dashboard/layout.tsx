@@ -9,6 +9,7 @@ import {
   Bot,
   ShoppingBag,
   QrCode,
+  UtensilsCrossed,
   LogOut,
   Bell,
   Sparkles,
@@ -62,6 +63,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const navItems = [
     { label: 'Bandeja en Vivo', href: '/dashboard/livechat', icon: MessageSquare },
+    { label: 'Pedidos & Cocina', href: '/dashboard/orders', icon: UtensilsCrossed },
     { label: 'Embudo Kanban', href: '/dashboard/kanban', icon: Kanban },
     { label: 'Bot Builder (IA)', href: '/dashboard/bot-builder', icon: Bot },
     { label: 'Catálogo & RAG', href: '/dashboard/catalog', icon: ShoppingBag },

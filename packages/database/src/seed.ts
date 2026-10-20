@@ -273,9 +273,36 @@ async function main() {
         },
       ],
     });
-  }
+  // 6. Tenant Oficial del SaaS para Ventas Facebook Ads (SuperAdmin)
+  const saasTenant = await prisma.tenant.upsert({
+    where: { slug: 'plataforma-saas' },
+    update: {},
+    create: {
+      businessName: 'Plataforma CRM & Bots WhatsApp SaaS',
+      slug: 'plataforma-saas',
+      planId: planPro.id,
+      billingEmail: 'ventas@crmwhatsapp.com',
+      phone: '+573009998877',
+      countryCode: 'CO',
+      currency: 'USD',
+      isActive: true,
+    },
+  });
 
-  console.log('✅ Demo Tenant configurado exitosamente con catálogo y CRM listo.');
+  await prisma.botConfiguration.upsert({
+    where: { tenantId: saasTenant.id },
+    update: {},
+    create: {
+      tenantId: saasTenant.id,
+      botName: 'Sofía',
+      roleDescription: 'Asesora comercial experta en la plataforma de CRM y Asistentes Virtuales de WhatsApp.',
+      tone: BotTone.AGGRESSIVE_SALES,
+      temperature: 0.35,
+      debounceSeconds: 2,
+    },
+  });
+
+  console.log('✅ Demo Tenant y Plataforma SaaS configurados exitosamente.');
 }
 
 main()

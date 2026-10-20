@@ -10,6 +10,7 @@ import { catalogRoutes } from './modules/catalog/catalog.routes';
 import { crmRoutes } from './modules/crm/crm.routes';
 import { connectionRoutes } from './modules/connections/connections.routes';
 import { webhookRoutes } from './modules/webhooks/webhook.routes';
+import { orderRoutes } from './modules/orders/order.routes';
 import { getGeminiModel } from './lib/gemini';
 import './queues/debounce.queue';
 import './queues/outbound.queue';
@@ -74,6 +75,7 @@ async function buildServer() {
   await app.register(crmRoutes, { prefix: '/api' });
   await app.register(connectionRoutes, { prefix: '/api' });
   await app.register(webhookRoutes, { prefix: '/api' });
+  await app.register(orderRoutes, { prefix: '/api' });
 
   // Endpoint de salud
   app.get('/health', async () => ({

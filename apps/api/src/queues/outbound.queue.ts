@@ -49,10 +49,12 @@ export const outboundWorker = new Worker<OutboundMessageData>(
       if (typingSimulationEnabled) {
         await gateway.sendPresence(recipientPhone, 'composing');
 
-        // Cálculo de retraso orgánico proporcional al largo del texto
+        // Cálculo de retraso orgánico ágil (600ms - 1200ms)
+        const effectiveMin = Math.min(minTypingDelayMs || 600, 800);
+        const effectiveMax = Math.min(maxTypingDelayMs || 1200, 1500);
         const computedDelay = Math.min(
-          maxTypingDelayMs,
-          Math.max(minTypingDelayMs, responseText.length * 30)
+          effectiveMax,
+          Math.max(effectiveMin, Math.floor(responseText.length * 15))
         );
 
         console.log(`✍️ [Simulador Escritura] "Escribiendo..." a ${recipientPhone} durante ${computedDelay}ms`);

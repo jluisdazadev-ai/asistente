@@ -207,6 +207,15 @@ model BotConfiguration {
   outOfHoursReplyEnabled     Boolean   @default(true)
   outOfHoursMessage          String?   @default("¡Hola! En este momento estamos fuera de nuestro horario de atención. Déjanos tu mensaje y te responderemos a primera hora.") @db.Text
   
+  // Líneas y Grupos de Notificación Operativa WhatsApp
+  financeNotificationPhone   String?   // Teléfono o ID de grupo opcional para finanzas/pagos
+  kitchenNotificationPhone   String?   // Teléfono o ID de grupo opcional para comandas
+  kitchenPrepMinutes         Int       @default(30)
+  financeGroupId             String?   // ID de grupo WhatsApp opcional (ej. 1203630...@g.us)
+  kitchenGroupId             String?   // ID de grupo WhatsApp opcional
+  notifyFinanceGroup         Boolean   @default(false)
+  notifyKitchenGroup         Boolean   @default(false)
+
   isActive                   Boolean   @default(true)
   createdAt                  DateTime  @default(now())
   updatedAt                  DateTime  @updatedAt
@@ -471,6 +480,7 @@ model Order {
   contactId            String
   contact              Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
   status               OrderStatus   @default(DRAFT)
+  shortCode            String?
   subtotal             Decimal       @default(0.00) @db.Decimal(12, 2)
   deliveryCost         Decimal       @default(0.00) @db.Decimal(12, 2)
   total                Decimal       @default(0.00) @db.Decimal(12, 2)

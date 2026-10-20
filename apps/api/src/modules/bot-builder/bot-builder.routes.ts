@@ -72,6 +72,13 @@ export const botBuilderRoutes: FastifyPluginAsync = async (fastify: FastifyInsta
         visionOcrEnabled: body.visionOcrEnabled,
         outOfHoursReplyEnabled: body.outOfHoursReplyEnabled,
         outOfHoursMessage: body.outOfHoursMessage,
+        financeNotificationPhone: body.financeNotificationPhone,
+        kitchenNotificationPhone: body.kitchenNotificationPhone,
+        kitchenPrepMinutes: body.kitchenPrepMinutes !== undefined ? parseInt(body.kitchenPrepMinutes, 10) : undefined,
+        financeGroupId: body.financeGroupId,
+        kitchenGroupId: body.kitchenGroupId,
+        notifyFinanceGroup: body.notifyFinanceGroup,
+        notifyKitchenGroup: body.notifyKitchenGroup,
         isActive: body.isActive,
       },
       create: {
